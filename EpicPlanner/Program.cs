@@ -252,12 +252,12 @@ namespace EpicPlanner
                 epic.ParseAssignments(assigned, willAssign, resourceNames);
                 epic.ParseDependencies(depRaw);
 
-                // 0 hours epics: consider complete (as v4.1 fix)
+                // FIX #2: handle 0h epics
                 if (epic.Charge <= 0)
                 {
                     epic.Remaining = 0;
-                    epic.StartDate = (endAnalysis ?? (Program.Sprint0Start.AddDays(-30)));
-                    epic.EndDate = (endAnalysis ?? (Program.Sprint0Start.AddDays(-1)));
+                    epic.StartDate = endAnalysis ?? Program.Sprint0Start;
+                    epic.EndDate = endAnalysis ?? Program.Sprint0Start;
                 }
 
                 epics.Add(epic);
@@ -317,7 +317,8 @@ namespace EpicPlanner
             foreach (var d in e.Dependencies)
             {
                 if (!completedMap.TryGetValue(d, out var depEnd)) return false;
-                if (!(depEnd.Date < sprintStart.Date)) return false;
+                // FIX #1: allow start if depEnd < sprintStart
+                if (depEnd.Date >= sprintStart.Date) return false;
             }
             return true;
         }
@@ -418,7 +419,8 @@ namespace EpicPlanner
                             if (ep.Remaining <= 1e-6)
                             {
                                 ep.Remaining = 0;
-                                ep.EndDate = sprintEnd;
+                                // FIX #3: EndDate = sprintStart
+                                ep.EndDate = sprintStart;
                                 completedMap[ep.Name] = ep.EndDate.Value;
                             }
                         }
@@ -660,7 +662,8 @@ namespace EpicPlanner
                 .ToList();
 
             // Visual constants
-            int leftLabelPad = 380;                 // space reserved at left for epic names
+
+            //int leftLabelPad = 420;                 // space reserved at left for epic names
             int rightLegendPad = 260;               // legend area
             int topDateAxisPad = 80;                // top dates
             int topTitlePad = 50;
@@ -679,11 +682,33 @@ namespace EpicPlanner
             // Paints
             var black = new SKPaint { Color = SKColors.Black, IsAntialias = true };
             var grey = new SKPaint { Color = new SKColor(230, 230, 230), IsAntialias = true };
-            var gridPaintV = new SKPaint { Color = new SKColor(200, 200, 200), IsAntialias = true, StrokeWidth = 1 };
-            var gridPaintH = new SKPaint { Color = new SKColor(220, 220, 220), IsAntialias = true, StrokeWidth = 1 };
+            var gridPaintV = new SKPaint
+            {
+                Color = new SKColor(200, 200, 200),
+                IsAntialias = true,
+                StrokeWidth = 1,
+                PathEffect = SKPathEffect.CreateDash(new float[] { 4, 4 }, 0)
+            };
+            var gridPaintH = new SKPaint
+            {
+                Color = new SKColor(220, 220, 220),
+                IsAntialias = true,
+                StrokeWidth = 1,
+                PathEffect = SKPathEffect.CreateDash(new float[] { 4, 4 }, 0)
+            };
             var titlePaint = new SKPaint { Color = SKColors.Black, TextSize = 20, IsAntialias = true };
             var labelPaint = new SKPaint { Color = SKColors.Black, TextSize = 13, IsAntialias = true };
             var axisPaint = new SKPaint { Color = SKColors.Black, TextSize = 12, IsAntialias = true };
+
+            // Measure max epic title width
+            float maxLabelWidth = 0;
+            foreach (var e in epics.Where(ep => ep.StartDate.HasValue && ep.EndDate.HasValue))
+            {
+                float w = labelPaint.MeasureText(e.Name);
+                if (w > maxLabelWidth) maxLabelWidth = w;
+            }
+
+            int leftLabelPad = (int)(maxLabelWidth + 40); // space reserved at left for epic names, dynamic padding with margin
 
             // Colors
             SKColor LIGHT_GREEN = SKColor.Parse("#77dd77");
@@ -746,7 +771,7 @@ namespace EpicPlanner
 
                 // Epic label to the left (outside)
                 labelPaint.TextAlign = SKTextAlign.Right;
-                canvas.DrawText(r.Name, plotLeft - 15, cy + 5, labelPaint);
+                canvas.DrawText(r.Name, plotLeft - 10, cy + 5, labelPaint);
             }
 
             // Bottom axis: sprint numbers (centered at each sprint band)
@@ -764,14 +789,19 @@ namespace EpicPlanner
                 float x = plotLeft + s * xStep;
                 var dt = sprint0.AddDays(s * sprintDays);
                 string txt = dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                canvas.DrawText(txt, x + 2, topTitlePad + 20, axisPaint); // +2 px so the text start sits on the line visually
+
+                canvas.Save();
+                canvas.RotateDegrees(-45, x, plotTop - 5);   // anchor at the grid top
+                canvas.DrawText(txt, x, plotTop - 5, axisPaint);
+                canvas.Restore();
             }
-            canvas.DrawText("Sprint start date", (plotLeft + plotRight) / 2f - 50, topTitlePad + 40, axisPaint);
+            canvas.DrawText("Sprint start date", (plotLeft + plotRight) / 2f - 50, topTitlePad + 20, axisPaint);
 
             // Legend on the right
-            float lgX = plotRight + 30;
-            float lgY = topTitlePad + 10;
-            float box = 14f;
+            float lgX = plotRight + 40;
+            float lgY = topTitlePad + 20;
+            float box = 16f;
+
             var legendItems = new List<(string Label, SKColor Color)>
             {
                 ("In Development", LIGHT_GREEN),
@@ -779,13 +809,17 @@ namespace EpicPlanner
                 ("Pending Analysis", BORDEAUX),
                 ("Pending Development", LIGHT_BLUE)
             };
+
             foreach (var item in legendItems)
             {
-                using var p = new SKPaint { Color = item.Color, IsAntialias = true, Style = SKPaintStyle.Fill };
-                var r = new SKRect(lgX, lgY, lgX + box, lgY + box);
-                canvas.DrawRect(r, p);
-                canvas.DrawText(item.Label, lgX + box + 8, lgY + box - 2, labelPaint);
-                lgY += 24;
+                using var paint = new SKPaint { Color = item.Color, IsAntialias = true, Style = SKPaintStyle.Fill };
+                var rect = new SKRect(lgX, lgY, lgX + box, lgY + box);
+                canvas.DrawRect(rect, paint);
+
+                labelPaint.TextAlign = SKTextAlign.Left;
+                canvas.DrawText(item.Label, lgX + box + 10, lgY + box - 3, labelPaint);
+
+                lgY += 28; // spacing
             }
 
             // Save PNG
