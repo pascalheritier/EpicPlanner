@@ -13,8 +13,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="20250902_Team Engineering - Epics planning per teammate %284%29.xlsx">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <None Update="[Athena] Planification_des_Epics.xlsx">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 

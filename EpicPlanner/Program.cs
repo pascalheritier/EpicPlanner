@@ -24,7 +24,7 @@ namespace EpicPlanner
             ExcelPackage.License.SetNonCommercialPersonal("My Name"); //This will also set the Author property to the name provided in the argument.
 
             // Input/outputs (adjust paths as needed)
-            string inputPath = "20250902_Team Engineering - Epics planning per teammate (4).xlsx";
+            string inputPath = "[Athena] Planification_des_Epics.xlsx";
             string outputXlsx = "epics_strict_with_spillover_v5_approved.xlsx";
             string outputPng = "epics_strict_with_spillover_v5_gantt_sprints.png";
 
@@ -156,7 +156,7 @@ namespace EpicPlanner
         public void Run(string inputPath, string outputExcel, string outputPng)
         {
             using var package = new ExcelPackage(new FileInfo(inputPath));
-            var wsEpics = package.Workbook.Worksheets["Epics"];
+            var wsEpics = package.Workbook.Worksheets["Planification des Epics"];
             var wsRes = package.Workbook.Worksheets["Resources par Sprint"];
 
             var resources = LoadResources(wsRes);                 // name -> dev hours per sprint (Heures Dév. Epic)
