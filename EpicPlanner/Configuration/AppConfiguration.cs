@@ -3,13 +3,12 @@
 internal class AppConfiguration
 {
     public RedmineConfiguration RedmineConfiguration { get; set; }
-
     public PlannerConfiguration PlannerConfiguration { get; set; }
 }
 
 internal class PlannerConfiguration
 {
-    public DateTime Sprint0Start { get; set; }
+    public DateTime InitialSprintStart { get; set; }
     public int SprintDays { get; set; }
     public int SprintCapacityDays { get; set; }
     public int MaxSprintCount { get; set; }

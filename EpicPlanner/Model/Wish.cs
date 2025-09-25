@@ -1,13 +1,21 @@
-﻿namespace EpicPlanner
+﻿namespace EpicPlanner;
+
+internal class Wish
 {
-    internal class Wish
+    #region Constructor
+
+    public Wish(string _strResource, double _dPercentage)
     {
-        public string Resource { get; }
-        public double Pct { get; }
-        public Wish(string resource, double pct)
-        {
-            Resource = resource;
-            Pct = pct;
-        }
+        Resource = _strResource;
+        Percentage = _dPercentage;
     }
+
+    #endregion
+
+    #region Description
+
+    public string Resource { get; }
+    public double Percentage { get; }
+
+    #endregion
 }

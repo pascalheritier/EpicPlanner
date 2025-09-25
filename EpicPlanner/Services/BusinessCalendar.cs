@@ -1,27 +1,41 @@
-﻿public static class BusinessCalendar
+﻿namespace EpicPlanner;
+
+public static class BusinessCalendar
 {
-    public static bool IsWeekend(DateTime d) =>
-        d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday;
+    #region Date helpers
 
-    public static bool IsHoliday(DateTime d, IEnumerable<DateTime> holidays) =>
-        holidays != null && holidays.Contains(d.Date);
+    public static bool IsWeekend(DateTime _InputDate) =>
+        _InputDate.DayOfWeek == DayOfWeek.Saturday || _InputDate.DayOfWeek == DayOfWeek.Sunday;
 
-    public static int CountWorkingDays(DateTime start, DateTime end, IEnumerable<DateTime> holidays)
+    public static bool IsHoliday(DateTime _InputDate, IEnumerable<DateTime> _Holidays) =>
+        _Holidays != null && _Holidays.Contains(_InputDate.Date);
+
+    public static int CountWorkingDays(
+        DateTime _StartDate,
+        DateTime _EndDate,
+        IEnumerable<DateTime> _Holidays)
     {
-        if (end < start) return 0;
+        if (_EndDate < _StartDate) return 0;
         int count = 0;
-        for (var d = start.Date; d <= end.Date; d = d.AddDays(1))
+        for (var d = _StartDate.Date; d <= _EndDate.Date; d = d.AddDays(1))
         {
-            if (!IsWeekend(d) && !IsHoliday(d, holidays)) count++;
+            if (!IsWeekend(d) && !IsHoliday(d, _Holidays)) count++;
         }
         return count;
     }
 
-    public static int CountWorkingDaysOverlap(DateTime aStart, DateTime aEnd, DateTime sStart, DateTime sEnd, IEnumerable<DateTime> holidays)
+    public static int CountWorkingDaysOverlap(
+        DateTime _AbsenceStartDate,
+        DateTime _AbsenceEndDate,
+        DateTime _SprintStartDate,
+        DateTime _SprintEndDate,
+        IEnumerable<DateTime> _Holidays)
     {
-        var start = (aStart > sStart) ? aStart.Date : sStart.Date;
-        var end = (aEnd < sEnd) ? aEnd.Date : sEnd.Date;
+        var start = (_AbsenceStartDate > _SprintStartDate) ? _AbsenceStartDate.Date : _SprintStartDate.Date;
+        var end = (_AbsenceEndDate < _SprintEndDate) ? _AbsenceEndDate.Date : _SprintEndDate.Date;
         if (end < start) return 0;
-        return CountWorkingDays(start, end, holidays);
+        return CountWorkingDays(start, end, _Holidays);
     }
+
+    #endregion
 }

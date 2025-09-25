@@ -1,71 +1,80 @@
 ﻿using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace EpicPlanner
+namespace EpicPlanner;
+
+internal class Epic
 {
-    internal class Epic
+    #region Constructor
+
+    public Epic(string _strName, string _strState, double _dCharge, DateTime? _EndAnalysis)
     {
-        public string Name { get; }
-        public string State { get; }
-        public double Charge { get; }
-        public double Remaining { get; set; }
-        public DateTime? EndAnalysis { get; }
-        public List<Wish> Wishes { get; } = new();
-        public List<string> Dependencies { get; } = new();
+        Name = (_strName ?? "").Trim();
+        State = (_strState ?? "").Trim().ToLowerInvariant();
+        Charge = _dCharge;
+        Remaining = _dCharge;
+        EndAnalysis = _EndAnalysis;
+    }
 
-        public DateTime? StartDate { get; set; }
-        public DateTime? EndDate { get; set; }
+    #endregion
 
-        public List<Allocation> History { get; } = new();
+    #region Description
 
-        public Epic(string name, string state, double charge, DateTime? endAnalysis)
+    public string Name { get; }
+    public string State { get; }
+    public double Charge { get; }
+    public double Remaining { get; set; }
+    public DateTime? EndAnalysis { get; }
+    public List<Wish> Wishes { get; } = new();
+    public List<string> Dependencies { get; } = new();
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public List<Allocation> History { get; } = new();
+
+    #endregion
+
+    #region Epic logic
+
+    public bool IsInDevelopment => State.Contains("develop") && !State.Contains("pending");
+    public bool IsOtherAllowed => (State.Contains("analysis") || State.Contains("pending"));
+
+    public void ParseAssignments(string _strAssigned, string _strWillAssign, List<string> _ResourceNames)
+    {
+        foreach (var raw in (_strAssigned + "," + _strWillAssign).Split(',', ';'))
         {
-            Name = (name ?? "").Trim();
-            State = (state ?? "").Trim().ToLowerInvariant();
-            Charge = charge;
-            Remaining = charge;
-            EndAnalysis = endAnalysis;
-        }
+            string s = raw.Trim();
+            if (string.IsNullOrWhiteSpace(s)) continue;
 
-        public bool IsInDevelopment => State.Contains("develop") && !State.Contains("pending");
-        public bool IsOtherAllowed => (State.Contains("analysis") || State.Contains("pending"));
-
-        public void ParseAssignments(string assigned, string willAssign, List<string> resourceNames)
-        {
-            foreach (var raw in (assigned + "," + willAssign).Split(',', ';'))
+            // Parse optional trailing percentage
+            var m = Regex.Match(s, @"(\d{1,3})\s*%$");
+            double pct = 1.0;
+            string name = s;
+            if (m.Success)
             {
-                string s = raw.Trim();
-                if (string.IsNullOrWhiteSpace(s)) continue;
-
-                // Parse optional trailing percentage
-                var m = Regex.Match(s, @"(\d{1,3})\s*%$");
-                double pct = 1.0;
-                string name = s;
-                if (m.Success)
-                {
-                    pct = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) / 100.0;
-                    name = s.Substring(0, m.Index).Trim();
-                }
-
-                // Fuzzy match a resource (exact or contains)
-                string matched = resourceNames.FirstOrDefault(r =>
-                    r.Equals(name, StringComparison.OrdinalIgnoreCase) ||
-                    r.Contains(name, StringComparison.OrdinalIgnoreCase));
-
-                if (!string.IsNullOrWhiteSpace(matched))
-                    Wishes.Add(new Wish(matched, pct));
+                pct = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) / 100.0;
+                name = s.Substring(0, m.Index).Trim();
             }
-        }
 
-        public void ParseDependencies(string depRaw)
-        {
-            if (string.IsNullOrWhiteSpace(depRaw)) return;
-            foreach (var d in depRaw.Split(',', ';'))
-            {
-                string dep = d.Trim();
-                if (!string.IsNullOrWhiteSpace(dep))
-                    Dependencies.Add(dep);
-            }
+            // Fuzzy match a resource (exact or contains)
+            string matched = _ResourceNames.FirstOrDefault(r =>
+                r.Equals(name, StringComparison.OrdinalIgnoreCase) ||
+                r.Contains(name, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrWhiteSpace(matched))
+                Wishes.Add(new Wish(matched, pct));
         }
     }
+
+    public void ParseDependencies(string _strDependencyRaw)
+    {
+        if (string.IsNullOrWhiteSpace(_strDependencyRaw)) return;
+        foreach (var d in _strDependencyRaw.Split(',', ';'))
+        {
+            string dep = d.Trim();
+            if (!string.IsNullOrWhiteSpace(dep))
+                Dependencies.Add(dep);
+        }
+    }
+
+    #endregion
 }
