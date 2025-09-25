@@ -11,6 +11,7 @@ internal class PlannerConfiguration
 {
     public DateTime Sprint0Start { get; set; }
     public int SprintDays { get; set; }
+    public int MaxSprintCount { get; set; }
 }
 
 internal class RedmineConfiguration

@@ -17,7 +17,7 @@ namespace EpicPlanner
             this.sprintDays = appConfiguration.PlannerConfiguration.SprintDays;
         }
 
-        public void Run(string inputPath, string outputExcel, string outputPng)
+        public async Task RunAsync(string inputPath, string outputExcel, string outputPng)
         {
             using var package = new ExcelPackage(new FileInfo(inputPath));
             var wsEpics = package.Workbook.Worksheets["Planification des Epics"];
@@ -26,16 +26,20 @@ namespace EpicPlanner
             var resources = LoadResources(wsRes);                 // name -> dev hours per sprint (Heures Dév. Epic)
             var epics = LoadEpics(wsEpics, resources.Keys.ToList());
 
-            var absenceFetcher = new AbsenceFetcher(m_AppConfiguration.RedmineConfiguration.ServerUrl, m_AppConfiguration.RedmineConfiguration.ApiKey);
+            // Adjust resources for absences (for each sprint)
+            var absFetcher = new AbsenceFetcher(
+                m_AppConfiguration.RedmineConfiguration.ServerUrl,
+                m_AppConfiguration.RedmineConfiguration.ApiKey);
+            Dictionary<int, Dictionary<string, double>> adjustedCapacities = await AdjustCapacitiesForAbsencesAsync(resources, absFetcher);
 
-            var simulator = new Simulator(epics, resources, sprint0Start, sprintDays);
-            simulator.Run();                                            // scheduling with v4.1 fixed rules
+            var simulator = new Simulator(epics, adjustedCapacities, sprint0Start, sprintDays, m_AppConfiguration.PlannerConfiguration.MaxSprintCount);
+            simulator.Run();
 
-            simulator.ExportExcel(outputExcel);                         // all sheets (FinalSchedule, Allocations..., Verification, PerSprintSummary, OverBooking, Underutilization)
-            simulator.ExportGanttSprintBased(outputPng);                // PNG Gantt (style we validated)
+            simulator.ExportExcel(outputExcel);
+            simulator.ExportGanttSprintBased(outputPng);
         }
 
-        private Dictionary<string, double> LoadResources(OfficeOpenXml.ExcelWorksheet ws)
+        private Dictionary<string, double> LoadResources(ExcelWorksheet ws)
         {
             // We explicitly expect columns: [1] Ingénieur/Engineer, [2] Heures Dév. Epic
             int rows = ws.Dimension.End.Row;
@@ -64,6 +68,43 @@ namespace EpicPlanner
                 double hours = ws.Cells[r, hoursCol].GetValue<double>();
                 if (!string.IsNullOrWhiteSpace(name))
                     dict[name] = hours;
+            }
+            return dict;
+        }
+
+        private async Task<Dictionary<int, Dictionary<string, double>>> AdjustCapacitiesForAbsencesAsync(
+            Dictionary<string, double> baseCapacities,
+            AbsenceFetcher absFetcher)
+        {
+            Dictionary<int, Dictionary<string, double>> dict = new();
+            List<(DateTime Start, DateTime End)> absences = await absFetcher.GetEngineersVacationsAsync();
+
+            // Loop over sprints up to MaxSprints
+            for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
+            {
+                var sprintStart = sprint0Start.AddDays(sprint * sprintDays);
+                var sprintEnd = sprintStart.AddDays(sprintDays - 1);
+
+                var cap = new Dictionary<string, double>(baseCapacities, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var user in baseCapacities.Keys)
+                {
+                    foreach (var (start, end) in absences)
+                    {
+                        var overlapStart = (start > sprintStart) ? start : sprintStart;
+                        var overlapEnd = (end < sprintEnd) ? end : sprintEnd;
+
+                        if (overlapEnd >= overlapStart)
+                        {
+                            int absentDays = (int)(overlapEnd - overlapStart).TotalDays + 1;
+                            double dailyCap = baseCapacities[user] / sprintDays;
+                            cap[user] -= dailyCap * absentDays;
+                            if (cap[user] < 0) cap[user] = 0;
+                        }
+                    }
+                }
+
+                dict[sprint] = cap;
             }
             return dict;
         }

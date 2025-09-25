@@ -8,20 +8,22 @@ namespace EpicPlanner
     internal class Simulator
     {
         private readonly List<Epic> epics;
-        private readonly Dictionary<string, double> capacity;
+        private readonly Dictionary<int, Dictionary<string, double>> sprintCapacities;
         private readonly DateTime sprint0;
         private readonly int sprintDays;
+        private readonly int maxSprintCount;
 
         private readonly Dictionary<string, DateTime> completedMap = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<Allocation> allocations = new();
         private readonly List<(int Sprint, string Resource, double Unused, string Reason)> underutil = new();
 
-        public Simulator(List<Epic> epics, Dictionary<string, double> capacity, DateTime sprint0, int sprintDays)
+        public Simulator(List<Epic> epics, Dictionary<int, Dictionary<string, double>> sprintCapacities, DateTime sprint0, int sprintDays, int maxSprintCount)
         {
             this.epics = epics;
-            this.capacity = capacity;
+            this.sprintCapacities = sprintCapacities;
             this.sprint0 = sprint0;
             this.sprintDays = sprintDays;
+            this.maxSprintCount = maxSprintCount;
 
             // Mark 0h epics as completed in completedMap
             foreach (var e in epics.Where(e => e.Remaining <= 0))
@@ -48,7 +50,7 @@ namespace EpicPlanner
         public void Run()
         {
             // Strict assignment + spillover limited to assigned; priority In Development first, then others
-            for (int sprint = 0; sprint < 300; sprint++)
+            for (int sprint = 0; sprint < maxSprintCount; sprint++)
             {
                 if (epics.All(e => e.Remaining <= 1e-6)) break;
 
@@ -56,7 +58,7 @@ namespace EpicPlanner
                 var sprintEnd = sprintStart.AddDays(sprintDays - 1);
 
                 // resource capacity left this sprint
-                var resourceRemaining = capacity.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+                var resourceRemaining = new Dictionary<string, double>(sprintCapacities[sprint], StringComparer.OrdinalIgnoreCase);
 
                 // Two passes: In Development first, Others second
                 var activeDev = epics.Where(e => e.Remaining > 1e-6 && e.IsInDevelopment && DependencySatisfied(e, sprintStart)).ToList();
@@ -280,7 +282,11 @@ namespace EpicPlanner
             // PerSprintSummary
             var sprints = allocations.Select(a => a.Sprint).Distinct().OrderBy(s => s).ToList();
             if (sprints.Count == 0) sprints.Add(0);
-            var resList = capacity.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+            var resList = sprintCapacities.Values
+                .SelectMany(dict => dict.Keys)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             // Header
             var psHeaders = new List<string> { "Sprint", "Sprint_start", "Sprint_end" };
@@ -293,7 +299,7 @@ namespace EpicPlanner
             WriteTable(wsPS, psHeaders.ToArray());
 
             row = 2;
-            foreach (var s in sprints)
+            foreach (int s in sprints)
             {
                 DateTime start = SprintStartDate(s);
                 DateTime end = start.AddDays(sprintDays - 1);
@@ -304,7 +310,7 @@ namespace EpicPlanner
                 foreach (var rname in resList)
                 {
                     double alloc = Math.Round(allocations.Where(a => a.Sprint == s && a.Resource.Equals(rname, StringComparison.OrdinalIgnoreCase)).Sum(a => a.Hours), 2);
-                    double cap = capacity.TryGetValue(rname, out var hh) ? hh : 0.0;
+                    double cap = sprintCapacities[s].TryGetValue(rname, out var hh) ? hh : 0.0;
                     double pct = (cap > 0) ? Math.Round(alloc / cap * 100.0, 2) : 0.0;
                     wsPS.Cells[row, col++].Value = alloc;
                     wsPS.Cells[row, col++].Value = cap;

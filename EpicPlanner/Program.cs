@@ -19,7 +19,7 @@ namespace EpicPlanner
 
         #region Main
 
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             // EPPlus license (non-commercial)
             ExcelPackage.License.SetNonCommercialPersonal("My Name"); //This will also set the Author property to the name provided in the argument.
@@ -36,7 +36,7 @@ namespace EpicPlanner
                 IServiceProvider serviceProvider = services.BuildServiceProvider();
 
                 var planner = serviceProvider.GetRequiredService<Planner>();
-                planner.Run(inputPath, outputXlsx, outputPng);
+                await planner.RunAsync(inputPath, outputXlsx, outputPng);
                 Console.WriteLine("✅ Done");
                 Console.WriteLine($"Excel: {Path.GetFullPath(outputXlsx)}");
                 Console.WriteLine($"Gantt: {Path.GetFullPath(outputPng)}");

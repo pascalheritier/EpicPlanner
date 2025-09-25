@@ -1,4 +1,6 @@
 ﻿using Redmine.Net.Api;
+using Redmine.Net.Api.Async;
+using Redmine.Net.Api.Net;
 using Redmine.Net.Api.Types;
 using System.Collections.Specialized;
 
@@ -10,7 +12,9 @@ namespace EpicPlanner
 
         public AbsenceFetcher(string baseUrl, string apiKey)
         {
-            _manager = new RedmineManager(baseUrl, apiKey);
+            _manager = new RedmineManager(new RedmineManagerOptionsBuilder()
+                .WithHost(baseUrl)
+                .WithApiKeyAuthentication(apiKey));
         }
 
         public int GetUserId(string userName)
@@ -25,19 +29,17 @@ namespace EpicPlanner
         /// <summary>
         /// Get all accepted vacation absences for a given user
         /// </summary>
-        public List<(DateTime Start, DateTime End)> GetVacationsForUserAsync(string userName)
+        public async Task<List<(DateTime Start, DateTime End)>> GetEngineersVacationsAsync()
         {
             var result = new List<(DateTime, DateTime)>();
             var parameters = new NameValueCollection
             {
                 { RedmineKeys.SUBJECT, "Vacances" },
-                { RedmineKeys.ASSIGNED_TO_ID, GetUserId(userName).ToString() },
-                { RedmineKeys.STATUS_ID, "Accepted" }
+                { RedmineKeys.IS_CLOSED, "false" },
+                { RedmineKeys.STATUS_ID, "9" } // Accepted state
             };
 
-            if (!TryGetIssues(parameters, out IEnumerable<Issue> issues))
-                return result;
-
+            IEnumerable<Issue> issues = await GetIssuesAsync(parameters);
             foreach (var issue in issues)
             {
                 if (issue.StartDate.HasValue && issue.DueDate.HasValue)
@@ -48,20 +50,23 @@ namespace EpicPlanner
             return result;
         }
 
-        private bool TryGetIssues(NameValueCollection parameters, out IEnumerable<Issue>? foundIssues)
+        private async Task<IEnumerable<Issue>> GetIssuesAsync(NameValueCollection parameters)
         {
-            foundIssues = null;
             try
             {
-                foundIssues = _manager.GetObjects<Issue>(parameters);
+                RequestOptions requestOptions = new RequestOptions
+                {
+                    QueryString = parameters
+                };
+                IEnumerable<Issue> foundIssues = await _manager.GetAsync<Issue>(requestOptions);
                 if (foundIssues is not null)
-                    return true;
+                    return foundIssues;
             }
             catch (System.Exception e)
             {
                 // silent failure, found issue is null
             }
-            return false;
+            return Enumerable.Empty<Issue>();
         }
     }
 }
