@@ -21,31 +21,26 @@ internal class Program
 
     static async Task Main(string[] _Args)
     {
-        // EPPlus license (non-commercial)
-        ExcelPackage.License.SetNonCommercialPersonal("My Name"); //This will also set the Author property to the name provided in the argument.
-
-        // Input/outputs (adjust paths as needed)
-        string inputPath = "[Athena] Planification_des_Epics.xlsx";
-        string outputXlsx = @"D:\Users\pascal.heritier\OneDrive - Watchout\Bureau\epics_strict_with_spillover_v5_approved.xlsx";
-        string outputPng = @"D:\Users\pascal.heritier\OneDrive - Watchout\Bureau\epics_strict_with_spillover_v5_gantt_sprints.png";
-
         try
         {
+            ExcelPackage.License.SetNonCommercialPersonal("Adonite"); //This will also set the Author property to the name provided in the argument.
             IServiceCollection services = new ServiceCollection();
             ConfigureServices(services);
             IServiceProvider serviceProvider = services.BuildServiceProvider();
 
             var planner = serviceProvider.GetRequiredService<Planner>();
-            await planner.RunAsync(inputPath, outputXlsx, outputPng);
-            Console.WriteLine("✅ Done");
-            Console.WriteLine($"Excel: {Path.GetFullPath(outputXlsx)}");
-            Console.WriteLine($"Gantt: {Path.GetFullPath(outputPng)}");
+            await planner.RunAsync();
+
+            AppConfiguration config = serviceProvider.GetRequiredService<AppConfiguration>();
+            LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, "✅ Done");
+            LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"Excel: {Path.GetFullPath(config.FileConfiguration.OutputFilePath)}");
+            LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"Gantt: {Path.GetFullPath(config.FileConfiguration.OutputPngFilePath)}");
         }
         catch (Exception ex)
         {
             LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Fatal, $"Critical app failure: {ex.Message}{Environment.NewLine}{ex.StackTrace}");
-            Console.WriteLine("❌ Error: " + ex.Message);
-            Console.WriteLine(ex.StackTrace);
+            LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Fatal, "❌ Error: " + ex.Message);
+            LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Fatal, ex.StackTrace);
         }
     }
 

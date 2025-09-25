@@ -28,13 +28,13 @@ internal class Planner
 
     #region Planning logic
 
-    public async Task RunAsync(string _strInputPath, string _strOutputExcel, string _strOutputPng)
+    public async Task RunAsync()
     {
-        using var package = new ExcelPackage(new FileInfo(_strInputPath));
-        var wsEpics = package.Workbook.Worksheets["Planification des Epics"];
-        var wsRes = package.Workbook.Worksheets["Resources par Sprint"];
+        using var package = new ExcelPackage(new FileInfo(m_AppConfiguration.FileConfiguration.InputFilePath));
+        var wsEpics = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName];
+        var wsRes = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputResourcesSheetName];
 
-        var resources = LoadResources(wsRes);                 // name -> dev hours per sprint (Heures Dév. Epic)
+        var resources = LoadResources(wsRes);
         var epics = LoadEpics(wsEpics, resources.Keys.ToList());
 
         // Adjust resources for absences (for each sprint)
@@ -49,8 +49,8 @@ internal class Planner
         var simulator = new Simulator(epics, adjustedCapacities, m_InitialSprintStart, m_iSprintDays, m_AppConfiguration.PlannerConfiguration.MaxSprintCount);
         simulator.Run();
 
-        simulator.ExportExcel(_strOutputExcel);
-        simulator.ExportGanttSprintBased(_strOutputPng);
+        simulator.ExportExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
+        simulator.ExportGanttSprintBased(m_AppConfiguration.FileConfiguration.OutputPngFilePath);
     }
 
     private Dictionary<string, double> LoadResources(ExcelWorksheet _ResourcesWorksheet)

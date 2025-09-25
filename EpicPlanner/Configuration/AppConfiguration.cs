@@ -2,8 +2,18 @@
 
 internal class AppConfiguration
 {
+    public FileConfiguration FileConfiguration { get; set; }
     public RedmineConfiguration RedmineConfiguration { get; set; }
     public PlannerConfiguration PlannerConfiguration { get; set; }
+}
+
+internal class FileConfiguration
+{
+    public string InputFilePath { get; set; }
+    public string InputResourcesSheetName { get; set; }
+    public string InputEpicsSheetName { get; set; }
+    public string OutputFilePath { get; set; }
+    public string OutputPngFilePath { get; set; }
 }
 
 internal class PlannerConfiguration
