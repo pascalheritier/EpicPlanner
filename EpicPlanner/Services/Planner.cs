@@ -77,7 +77,7 @@ namespace EpicPlanner
             AbsenceFetcher absFetcher)
         {
             Dictionary<int, Dictionary<string, double>> dict = new();
-            List<(DateTime Start, DateTime End)> absences = await absFetcher.GetEngineersVacationsAsync();
+            Dictionary<string, List<(DateTime, DateTime)>> absencesPerResource = await absFetcher.GetResourcesAbsencesAsync();
 
             // Loop over sprints up to MaxSprints
             for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
@@ -85,11 +85,14 @@ namespace EpicPlanner
                 var sprintStart = sprint0Start.AddDays(sprint * sprintDays);
                 var sprintEnd = sprintStart.AddDays(sprintDays - 1);
 
-                var cap = new Dictionary<string, double>(baseCapacities, StringComparer.OrdinalIgnoreCase);
+                var capacities = new Dictionary<string, double>(baseCapacities, StringComparer.OrdinalIgnoreCase);
 
                 foreach (var user in baseCapacities.Keys)
                 {
-                    foreach (var (start, end) in absences)
+                    if (!absencesPerResource.ContainsKey(user))
+                        continue;
+
+                    foreach (var (start, end) in absencesPerResource[user])
                     {
                         var overlapStart = (start > sprintStart) ? start : sprintStart;
                         var overlapEnd = (end < sprintEnd) ? end : sprintEnd;
@@ -98,13 +101,13 @@ namespace EpicPlanner
                         {
                             int absentDays = (int)(overlapEnd - overlapStart).TotalDays + 1;
                             double dailyCap = baseCapacities[user] / sprintDays;
-                            cap[user] -= dailyCap * absentDays;
-                            if (cap[user] < 0) cap[user] = 0;
+                            capacities[user] -= dailyCap * absentDays;
+                            if (capacities[user] < 0) capacities[user] = 0;
                         }
                     }
                 }
 
-                dict[sprint] = cap;
+                dict[sprint] = capacities;
             }
             return dict;
         }

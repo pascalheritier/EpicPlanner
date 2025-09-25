@@ -29,13 +29,12 @@ namespace EpicPlanner
         /// <summary>
         /// Get all accepted vacation absences for a given user
         /// </summary>
-        public async Task<List<(DateTime Start, DateTime End)>> GetEngineersVacationsAsync()
+        public async Task<Dictionary<string, List<(DateTime Start, DateTime End)>>> GetResourcesAbsencesAsync()
         {
-            var result = new List<(DateTime, DateTime)>();
+            Dictionary<string, List<(DateTime, DateTime)>> result = new();
             var parameters = new NameValueCollection
             {
-                { RedmineKeys.SUBJECT, "Vacances" },
-                { RedmineKeys.IS_CLOSED, "false" },
+                { RedmineKeys.TRACKER_ID, "7" },
                 { RedmineKeys.STATUS_ID, "9" } // Accepted state
             };
 
@@ -44,7 +43,9 @@ namespace EpicPlanner
             {
                 if (issue.StartDate.HasValue && issue.DueDate.HasValue)
                 {
-                    result.Add((issue.StartDate.Value, issue.DueDate.Value));
+                    if (!result.ContainsKey(issue.Author.Name))
+                        result[issue.Author.Name] = new();
+                    result[issue.Author.Name].Add((issue.StartDate.Value, issue.DueDate.Value));
                 }
             }
             return result;
