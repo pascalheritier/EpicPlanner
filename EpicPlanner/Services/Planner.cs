@@ -7,7 +7,7 @@ namespace EpicPlanner
     {
         private readonly DateTime sprint0Start;
         private readonly int sprintDays;
-        private const int MaxSprints = 300;
+        private readonly int sprintCapacityDays;
         private readonly AppConfiguration m_AppConfiguration;
 
         public Planner(AppConfiguration appConfiguration, ILoggerFactory loggerFactory)
@@ -15,6 +15,7 @@ namespace EpicPlanner
             m_AppConfiguration = appConfiguration ?? throw new ArgumentNullException(nameof(appConfiguration));
             this.sprint0Start = appConfiguration.PlannerConfiguration.Sprint0Start;
             this.sprintDays = appConfiguration.PlannerConfiguration.SprintDays;
+            this.sprintCapacityDays = appConfiguration.PlannerConfiguration.SprintCapacityDays;
         }
 
         public async Task RunAsync(string inputPath, string outputExcel, string outputPng)
@@ -30,7 +31,10 @@ namespace EpicPlanner
             var absFetcher = new AbsenceFetcher(
                 m_AppConfiguration.RedmineConfiguration.ServerUrl,
                 m_AppConfiguration.RedmineConfiguration.ApiKey);
-            Dictionary<int, Dictionary<string, double>> adjustedCapacities = await AdjustCapacitiesForAbsencesAsync(resources, absFetcher);
+            Dictionary<int, Dictionary<string, double>> adjustedCapacities = await AdjustCapacitiesForAbsencesAsync(
+                resources,
+                absFetcher,
+                m_AppConfiguration.PlannerConfiguration.Holidays);
 
             var simulator = new Simulator(epics, adjustedCapacities, sprint0Start, sprintDays, m_AppConfiguration.PlannerConfiguration.MaxSprintCount);
             simulator.Run();
@@ -74,43 +78,52 @@ namespace EpicPlanner
 
         private async Task<Dictionary<int, Dictionary<string, double>>> AdjustCapacitiesForAbsencesAsync(
             Dictionary<string, double> baseCapacities,
-            AbsenceFetcher absFetcher)
+            AbsenceFetcher absFetcher,
+            IEnumerable<DateTime> holidays)
         {
             Dictionary<int, Dictionary<string, double>> dict = new();
             Dictionary<string, List<(DateTime, DateTime)>> absencesPerResource = await absFetcher.GetResourcesAbsencesAsync();
 
-            // Loop over sprints up to MaxSprints
             for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
             {
-                var sprintStart = sprint0Start.AddDays(sprint * sprintDays);
-                var sprintEnd = sprintStart.AddDays(sprintDays - 1);
+                var sprintStart = sprint0Start.AddDays(sprint * sprintDays).Date;
+                var sprintEnd = sprintStart.AddDays(sprintDays - 1).Date;
 
-                var capacities = new Dictionary<string, double>(baseCapacities, StringComparer.OrdinalIgnoreCase);
+                // Compute how many working days exist in this sprint
+                int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, holidays);
+
+                var capacities = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (var user in baseCapacities.Keys)
                 {
-                    if (!absencesPerResource.ContainsKey(user))
-                        continue;
+                    // Start from base sprint hours, scaled to real working days
+                    double sprintCap = baseCapacities[user];
+                    double scale = (double)workingDaysInSprint / sprintCapacityDays;
+                    sprintCap *= scale;
 
-                    foreach (var (start, end) in absencesPerResource[user])
+                    if (absencesPerResource.TryGetValue(user, out var absList))
                     {
-                        var overlapStart = (start > sprintStart) ? start : sprintStart;
-                        var overlapEnd = (end < sprintEnd) ? end : sprintEnd;
-
-                        if (overlapEnd >= overlapStart)
+                        foreach (var (start, end) in absList)
                         {
-                            int absentDays = (int)(overlapEnd - overlapStart).TotalDays + 1;
-                            double dailyCap = baseCapacities[user] / sprintDays;
-                            capacities[user] -= dailyCap * absentDays;
-                            if (capacities[user] < 0) capacities[user] = 0;
+                            int absentWD = BusinessCalendar.CountWorkingDaysOverlap(start, end, sprintStart, sprintEnd, holidays);
+                            if (absentWD > 0 && workingDaysInSprint > 0)
+                            {
+                                double dailyCap = sprintCap / workingDaysInSprint;
+                                sprintCap -= dailyCap * absentWD;
+                            }
                         }
                     }
+
+                    if (sprintCap < 0) sprintCap = 0;
+                    capacities[user] = Math.Round(sprintCap, 2);
                 }
 
                 dict[sprint] = capacities;
             }
+
             return dict;
         }
+
 
         private List<Epic> LoadEpics(OfficeOpenXml.ExcelWorksheet ws, List<string> resourceNames)
         {
