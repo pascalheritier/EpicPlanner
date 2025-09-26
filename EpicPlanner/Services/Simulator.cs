@@ -10,7 +10,7 @@ internal class Simulator
     #region Members
     
     private readonly List<Epic> m_Epics;
-    private readonly Dictionary<int, Dictionary<string, double>> m_SprintCapacities;
+    private readonly Dictionary<int, Dictionary<string, ResourceCapacity>> m_SprintCapacities;
     private readonly DateTime m_InitialSprintDate;
     private readonly int m_iSprintDays;
     private readonly int m_iMaxSprintCount;
@@ -25,7 +25,7 @@ internal class Simulator
 
     public Simulator(
         List<Epic> _Epics,
-        Dictionary<int, Dictionary<string, double>> _SprintCapacities,
+        Dictionary<int, Dictionary<string, ResourceCapacity>> _SprintCapacities,
         DateTime _InitialSprintDate,
         int _iSprintDays,
         int _iMaxSprintCount)
@@ -73,7 +73,7 @@ internal class Simulator
             var sprintEnd = sprintStart.AddDays(m_iSprintDays - 1);
 
             // resource capacity left this sprint
-            var resourceRemaining = new Dictionary<string, double>(m_SprintCapacities[sprint], StringComparer.OrdinalIgnoreCase);
+            var resourceRemaining = new Dictionary<string, ResourceCapacity>(m_SprintCapacities[sprint], StringComparer.OrdinalIgnoreCase);
 
             // Two passes: In Development first, Others second
             var activeDev = m_Epics.Where(e => e.Remaining > 1e-6 && e.IsInDevelopment && DependencySatisfied(e, sprintStart)).ToList();
@@ -88,7 +88,7 @@ internal class Simulator
                     foreach (var w in e.Wishes)
                     {
                         if (!resourceRemaining.ContainsKey(w.Resource) || w.Percentage <= 0) continue;
-                        double desired = resourceRemaining[w.Resource] * w.Percentage;
+                        double desired = resourceRemaining[w.Resource].Development * w.Percentage;
                         if (!requests.TryGetValue(w.Resource, out var list))
                             list = requests[w.Resource] = new List<(Epic, double, double)>();
                         list.Add((e, desired, w.Percentage));
@@ -102,7 +102,7 @@ internal class Simulator
                     var reqs = kv.Value;
                     if (reqs.Count == 0) continue;
 
-                    double avail = resourceRemaining[rname];
+                    double avail = resourceRemaining[rname].Development;
                     double totalDesired = reqs.Sum(x => x.desired);
                     double scale = (totalDesired <= avail || totalDesired <= 1e-9) ? 1.0 : (avail / totalDesired);
 
@@ -113,7 +113,7 @@ internal class Simulator
                         if (alloc <= 1e-9) continue;
 
                         CommitAllocation(epic, sprint, rname, alloc, sprintStart);
-                        resourceRemaining[rname] -= alloc;
+                        resourceRemaining[rname].Development -= alloc;
                         if (epic.StartDate == null) epic.StartDate = sprintStart;
                         if (epic.Remaining <= 1e-6)
                         {
@@ -128,7 +128,7 @@ internal class Simulator
                 // Spillover (only to epics where the resource is assigned)
                 foreach (var rname in resourceRemaining.Keys.ToList())
                 {
-                    double leftover = resourceRemaining[rname];
+                    double leftover = resourceRemaining[rname].Development;
                     if (leftover <= 1e-6) continue;
 
                     var candidates = activeSet.Where(e => e.Wishes.Any(w => w.Resource.Equals(rname, StringComparison.OrdinalIgnoreCase)) && e.Remaining > 1e-6).ToList();
@@ -153,7 +153,7 @@ internal class Simulator
 
                         CommitAllocation(ep, sprint, rname, alloc, sprintStart);
                         leftover -= alloc;
-                        resourceRemaining[rname] -= alloc;
+                        resourceRemaining[rname].Development -= alloc;
                         if (ep.StartDate == null) ep.StartDate = sprintStart;
                         if (ep.Remaining <= 1e-6)
                         {
@@ -169,12 +169,12 @@ internal class Simulator
             // Underutilization (why capacity was left unconsumed)
             foreach (var kv in resourceRemaining)
             {
-                if (kv.Value > 1e-6)
+                if (kv.Value.Development > 1e-6)
                 {
                     string reason;
                     bool resourceHadAssignedEpics = m_Epics.Any(ep => ep.Wishes.Any(w => w.Resource.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)));
                     reason = resourceHadAssignedEpics ? "no remaining hours on assigned epics" : "no assigned epics";
-                    m_Underutilization.Add((sprint, kv.Key, Math.Round(kv.Value, 2), reason));
+                    m_Underutilization.Add((sprint, kv.Key, Math.Round(kv.Value.Development, 2), reason));
                 }
             }
         }
@@ -328,7 +328,7 @@ internal class Simulator
             foreach (var rname in resList)
             {
                 double alloc = Math.Round(m_Allocations.Where(a => a.Sprint == s && a.Resource.Equals(rname, StringComparison.OrdinalIgnoreCase)).Sum(a => a.Hours), 2);
-                double cap = m_SprintCapacities[s].TryGetValue(rname, out var hh) ? hh : 0.0;
+                double cap = m_SprintCapacities[s].TryGetValue(rname, out var hh) ? hh.Development : 0.0;
                 double pct = (cap > 0) ? Math.Round(alloc / cap * 100.0, 2) : 0.0;
                 wsPS.Cells[row, col++].Value = alloc;
                 wsPS.Cells[row, col++].Value = cap;

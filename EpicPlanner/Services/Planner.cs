@@ -41,7 +41,7 @@ internal class Planner
         var absFetcher = new AbsenceFetcher(
             m_AppConfiguration.RedmineConfiguration.ServerUrl,
             m_AppConfiguration.RedmineConfiguration.ApiKey);
-        Dictionary<int, Dictionary<string, double>> adjustedCapacities = await AdjustCapacitiesForAbsencesAsync(
+        Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = await AdjustCapacitiesForAbsencesAsync(
             resources,
             absFetcher,
             m_AppConfiguration.PlannerConfiguration.Holidays);
@@ -53,45 +53,50 @@ internal class Planner
         simulator.ExportGanttSprintBased(m_AppConfiguration.FileConfiguration.OutputPngFilePath);
     }
 
-    private Dictionary<string, double> LoadResources(ExcelWorksheet _ResourcesWorksheet)
+    private Dictionary<string, ResourceCapacity> LoadResources(ExcelWorksheet _ResourceWorksheet)
     {
-        // We explicitly expect columns: [1] Ingénieur/Engineer, [2] Heures Dév. Epic
-        int rows = _ResourcesWorksheet.Dimension.End.Row;
-
-        // Detect headers by names to be resilient
+        int rows = _ResourceWorksheet.Dimension.End.Row;
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (int c = 1; c <= _ResourcesWorksheet.Dimension.End.Column; c++)
+
+        for (int c = 1; c <= _ResourceWorksheet.Dimension.End.Column; c++)
         {
-            var h = _ResourcesWorksheet.Cells[1, c].GetValue<string>()?.Trim();
+            var h = _ResourceWorksheet.Cells[1, c].GetValue<string>()?.Trim();
             if (!string.IsNullOrWhiteSpace(h)) headers[h] = c;
         }
 
-        int nameCol = headers.ContainsKey("Ingénieur") ? headers["Ingénieur"]
-                    : headers.ContainsKey("Engineer") ? headers["Engineer"] : 1;
+        int nameCol = headers.ContainsKey("Ingénieur") ? headers["Ingénieur"] :
+                       headers.ContainsKey("Engineer") ? headers["Engineer"] : 1;
 
-        int hoursCol = headers.ContainsKey("Heures Dév. Epic")
-                     ? headers["Heures Dév. Epic"]
-                     : headers.FirstOrDefault(kv => kv.Key.Contains("Heures", StringComparison.OrdinalIgnoreCase) && kv.Key.Contains("Epic", StringComparison.OrdinalIgnoreCase)).Value;
+        int devCol = headers.ContainsKey("Heures Dév. Epic") ? headers["Heures Dév. Epic"] : 2;
+        int maintCol = headers.ContainsKey("Heures maintenance") ? headers["Heures maintenance"] : 0;
+        int analCol = headers.ContainsKey("Heures Analyse Epic") ? headers["Heures Analyse Epic"] : 0;
 
-        if (hoursCol == 0) hoursCol = 2; // fallback
-
-        var dict = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
         for (int r = 2; r <= rows; r++)
         {
-            string name = _ResourcesWorksheet.Cells[r, nameCol].GetValue<string>()?.Trim();
-            double hours = _ResourcesWorksheet.Cells[r, hoursCol].GetValue<double>();
-            if (!string.IsNullOrWhiteSpace(name))
-                dict[name] = hours;
+            string name = _ResourceWorksheet.Cells[r, nameCol].GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            double dev = _ResourceWorksheet.Cells[r, devCol].GetValue<double>();
+            double maint = maintCol > 0 ? _ResourceWorksheet.Cells[r, maintCol].GetValue<double>() : 0;
+            double anal = analCol > 0 ? _ResourceWorksheet.Cells[r, analCol].GetValue<double>() : 0;
+
+            dict[name] = new ResourceCapacity
+            {
+                Development = dev,
+                Maintenance = maint,
+                Analysis = anal
+            };
         }
         return dict;
     }
 
-    private async Task<Dictionary<int, Dictionary<string, double>>> AdjustCapacitiesForAbsencesAsync(
-        Dictionary<string, double> _BaseCapacities,
+    private async Task<Dictionary<int, Dictionary<string, ResourceCapacity>>> AdjustCapacitiesForAbsencesAsync(
+        Dictionary<string, ResourceCapacity> _BaseCapacities,
         AbsenceFetcher _AbsenceFetcher,
         IEnumerable<DateTime> _Holidays)
     {
-        Dictionary<int, Dictionary<string, double>> dict = new();
+        Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = new();
         Dictionary<string, List<(DateTime, DateTime)>> absencesPerResource = await _AbsenceFetcher.GetResourcesAbsencesAsync();
 
         for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
@@ -102,14 +107,14 @@ internal class Planner
             // Compute how many working days exist in this sprint
             int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, _Holidays);
 
-            var capacities = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            var sprintCapacities = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var user in _BaseCapacities.Keys)
             {
                 // Start from base sprint hours, scaled to real working days
-                double sprintCap = _BaseCapacities[user];
+                ResourceCapacity userSprintCapacity = new(_BaseCapacities[user]);
                 double scale = (double)workingDaysInSprint / m_iSprintCapacityDays;
-                sprintCap *= scale;
+                userSprintCapacity.AdapteCapacityToScale(scale);
 
                 if (absencesPerResource.TryGetValue(user, out var absList))
                 {
@@ -118,20 +123,17 @@ internal class Planner
                         int absentWD = BusinessCalendar.CountWorkingDaysOverlap(start, end, sprintStart, sprintEnd, _Holidays);
                         if (absentWD > 0 && workingDaysInSprint > 0)
                         {
-                            double dailyCap = sprintCap / workingDaysInSprint;
-                            sprintCap -= dailyCap * absentWD;
+                            userSprintCapacity.AdaptCapacityToAbsences(workingDaysInSprint, absentWD);
                         }
                     }
                 }
-
-                if (sprintCap < 0) sprintCap = 0;
-                capacities[user] = Math.Round(sprintCap, 2);
+                userSprintCapacity.RoundUpCapacity();
+                sprintCapacities[user] = userSprintCapacity;
             }
-
-            dict[sprint] = capacities;
+            adjustedCapacities[sprint] = sprintCapacities;
         }
 
-        return dict;
+        return adjustedCapacities;
     }
 
 

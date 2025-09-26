@@ -23,7 +23,7 @@ internal class Program
     {
         try
         {
-            ExcelPackage.License.SetNonCommercialPersonal("Adonite"); //This will also set the Author property to the name provided in the argument.
+            ExcelPackage.License.SetNonCommercialPersonal("Adonite");
             IServiceCollection services = new ServiceCollection();
             ConfigureServices(services);
             IServiceProvider serviceProvider = services.BuildServiceProvider();
