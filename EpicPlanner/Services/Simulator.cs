@@ -202,8 +202,10 @@ internal class Simulator
         var wsPS = p.Workbook.Worksheets.Add("PerSprintSummary");
         var wsUnder = p.Workbook.Worksheets.Add("Underutilization");
         var wsOver = p.Workbook.Worksheets.Add("OverBooking");
+        var wsMaint = p.Workbook.Worksheets.Add("MaintenanceCapacities");
+        var wsAnal = p.Workbook.Worksheets.Add("AnalysisCapacities");
 
-        // FinalSchedule
+        // ---------------- FinalSchedule ----------------
         var finalRows = m_Epics.Select(e => new
         {
             Epic = e.Name,
@@ -215,7 +217,6 @@ internal class Simulator
             End_date = e.EndDate?.ToString("yyyy-MM-dd") ?? ""
         }).ToList();
 
-        // Sort by Start then numeric epic key (year, num)
         var finalSorted = finalRows
             .Select(r => new
             {
@@ -248,7 +249,7 @@ internal class Simulator
         }
         wsFinal.Cells.AutoFitColumns();
 
-        // AllocationsByEpicAndSprint
+        // ---------------- AllocationsByEpicAndSprint ----------------
         var aggA1 = m_Allocations
             .GroupBy(a => new { a.Epic, a.Sprint, a.Resource })
             .Select(g => new { g.Key.Epic, g.Key.Sprint, g.Key.Resource, Hours = Math.Round(g.Sum(x => x.Hours), 2) })
@@ -265,7 +266,7 @@ internal class Simulator
         }
         wsA1.Cells.AutoFitColumns();
 
-        // AllocationsByEpicPerSprint
+        // ---------------- AllocationsByEpicPerSprint ----------------
         var aggA2 = m_Allocations
             .GroupBy(a => new { a.Epic, a.Sprint, a.SprintStart })
             .Select(g => new { g.Key.Epic, g.Key.Sprint, g.Key.SprintStart, Total_Hours = Math.Round(g.Sum(x => x.Hours), 2) })
@@ -282,7 +283,7 @@ internal class Simulator
         }
         wsA2.Cells.AutoFitColumns();
 
-        // Verification
+        // ---------------- Verification ----------------
         WriteTable(wsVer, new[] { "Epic", "Initial_Charge_h", "Allocated_total_h", "Delta_h" });
         row = 2;
         foreach (var e in m_Epics.OrderBy(x => x.StartDate ?? DateTime.MaxValue).ThenBy(x => ExtractEpicKey(x.Name).Year).ThenBy(x => ExtractEpicKey(x.Name).Num))
@@ -297,7 +298,7 @@ internal class Simulator
         }
         wsVer.Cells.AutoFitColumns();
 
-        // PerSprintSummary
+        // ---------------- PerSprintSummary ----------------
         var sprints = m_Allocations.Select(a => a.Sprint).Distinct().OrderBy(s => s).ToList();
         if (sprints.Count == 0) sprints.Add(0);
         var resList = m_SprintCapacities.Values
@@ -306,7 +307,6 @@ internal class Simulator
             .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        // Header
         var psHeaders = new List<string> { "Sprint", "Sprint_start", "Sprint_end" };
         foreach (var rname in resList)
         {
@@ -328,7 +328,7 @@ internal class Simulator
             foreach (var rname in resList)
             {
                 double alloc = Math.Round(m_Allocations.Where(a => a.Sprint == s && a.Resource.Equals(rname, StringComparison.OrdinalIgnoreCase)).Sum(a => a.Hours), 2);
-                double cap = m_SprintCapacities[s].TryGetValue(rname, out var hh) ? hh.Development : 0.0;
+                double cap = m_SprintCapacities[s].TryGetValue(rname, out var rc) ? rc.Development : 0.0;
                 double pct = (cap > 0) ? Math.Round(alloc / cap * 100.0, 2) : 0.0;
                 wsPS.Cells[row, col++].Value = alloc;
                 wsPS.Cells[row, col++].Value = cap;
@@ -338,7 +338,39 @@ internal class Simulator
         }
         wsPS.Cells.AutoFitColumns();
 
-        // Underutilization
+        // ---------------- MaintenanceCapacities ----------------
+        WriteTable(wsMaint, new[] { "Sprint", "Resource", "Maintenance_h" });
+        row = 2;
+        foreach (int s in sprints)
+        {
+            foreach (var rname in resList)
+            {
+                double maint = m_SprintCapacities[s].TryGetValue(rname, out var rc) ? rc.Maintenance : 0.0;
+                wsMaint.Cells[row, 1].Value = s;
+                wsMaint.Cells[row, 2].Value = rname;
+                wsMaint.Cells[row, 3].Value = maint;
+                row++;
+            }
+        }
+        wsMaint.Cells.AutoFitColumns();
+
+        // ---------------- AnalysisCapacities ----------------
+        WriteTable(wsAnal, new[] { "Sprint", "Resource", "Analysis_h" });
+        row = 2;
+        foreach (int s in sprints)
+        {
+            foreach (var rname in resList)
+            {
+                double anal = m_SprintCapacities[s].TryGetValue(rname, out var rc) ? rc.Analysis : 0.0;
+                wsAnal.Cells[row, 1].Value = s;
+                wsAnal.Cells[row, 2].Value = rname;
+                wsAnal.Cells[row, 3].Value = anal;
+                row++;
+            }
+        }
+        wsAnal.Cells.AutoFitColumns();
+
+        // ---------------- Underutilization ----------------
         WriteTable(wsUnder, new[] { "Sprint", "Resource", "Unused_h", "Reason" });
         row = 2;
         foreach (var u in m_Underutilization.OrderBy(x => x.Sprint).ThenBy(x => x.Resource, StringComparer.OrdinalIgnoreCase))
@@ -351,7 +383,7 @@ internal class Simulator
         }
         wsUnder.Cells.AutoFitColumns();
 
-        // OverBooking (wish % sum by resource)
+        // ---------------- OverBooking ----------------
         var wishesByResource = new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase);
         foreach (var e in m_Epics)
         {
@@ -381,6 +413,7 @@ internal class Simulator
         // Save
         p.SaveAs(new FileInfo(_strOutputExcelFilePath));
     }
+
 
     private static void WriteTable(ExcelWorksheet _Worksheet, string[] _Headers)
     {
