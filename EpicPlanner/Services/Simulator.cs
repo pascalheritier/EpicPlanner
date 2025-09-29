@@ -8,12 +8,13 @@ namespace EpicPlanner;
 internal class Simulator
 {
     #region Members
-    
+
     private readonly List<Epic> m_Epics;
     private readonly Dictionary<int, Dictionary<string, ResourceCapacity>> m_SprintCapacities;
     private readonly DateTime m_InitialSprintDate;
     private readonly int m_iSprintDays;
     private readonly int m_iMaxSprintCount;
+    private readonly int m_iSprintOffset;
 
     private readonly Dictionary<string, DateTime> m_CompletedMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Allocation> m_Allocations = [];
@@ -28,13 +29,15 @@ internal class Simulator
         Dictionary<int, Dictionary<string, ResourceCapacity>> _SprintCapacities,
         DateTime _InitialSprintDate,
         int _iSprintDays,
-        int _iMaxSprintCount)
+        int _iMaxSprintCount,
+        int _iSprintOffset)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
         m_InitialSprintDate = _InitialSprintDate;
         m_iSprintDays = _iSprintDays;
         m_iMaxSprintCount = _iMaxSprintCount;
+        m_iSprintOffset = _iSprintOffset;
 
         // Mark 0h epics as completed in completedMap
         foreach (var e in _Epics.Where(e => e.Remaining <= 0))
@@ -268,7 +271,7 @@ internal class Simulator
         foreach (var r in aggA1)
         {
             wsA1.Cells[row, 1].Value = r.Epic;
-            wsA1.Cells[row, 2].Value = r.Sprint;
+            wsA1.Cells[row, 2].Value = r.Sprint + m_iSprintOffset;
             wsA1.Cells[row, 3].Value = r.Resource;
             wsA1.Cells[row, 4].Value = r.Hours;
             row++;
@@ -285,7 +288,7 @@ internal class Simulator
         foreach (var r in aggA2)
         {
             wsA2.Cells[row, 1].Value = r.Epic;
-            wsA2.Cells[row, 2].Value = r.Sprint;
+            wsA2.Cells[row, 2].Value = r.Sprint + m_iSprintOffset;
             wsA2.Cells[row, 3].Value = r.SprintStart.ToString("yyyy-MM-dd");
             wsA2.Cells[row, 4].Value = r.Total_Hours;
             row++;
@@ -308,8 +311,8 @@ internal class Simulator
         wsVer.Cells.AutoFitColumns();
 
         // ---------------- PerSprintSummary ----------------
-        var sprints = m_Allocations.Select(a => a.Sprint).Distinct().OrderBy(s => s).ToList();
-        if (sprints.Count == 0) sprints.Add(0);
+        var sprintIndexes = m_Allocations.Select(a => a.Sprint).Distinct().OrderBy(s => s).ToList();
+        if (sprintIndexes.Count == 0) sprintIndexes.Add(0);
         var resList = m_SprintCapacities.Values
             .SelectMany(dict => dict.Keys)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -326,18 +329,18 @@ internal class Simulator
         WriteTable(wsPS, psHeaders.ToArray());
 
         row = 2;
-        foreach (int s in sprints)
+        foreach (int sprintIndex in sprintIndexes)
         {
-            DateTime start = SprintStartDate(s);
+            DateTime start = SprintStartDate(sprintIndex);
             DateTime end = start.AddDays(m_iSprintDays - 1);
             int col = 1;
-            wsPS.Cells[row, col++].Value = s;
+            wsPS.Cells[row, col++].Value = sprintIndex + m_iSprintOffset;
             wsPS.Cells[row, col++].Value = start.ToString("yyyy-MM-dd");
             wsPS.Cells[row, col++].Value = end.ToString("yyyy-MM-dd");
             foreach (var rname in resList)
             {
-                double alloc = Math.Round(m_Allocations.Where(a => a.Sprint == s && a.Resource.Equals(rname, StringComparison.OrdinalIgnoreCase)).Sum(a => a.Hours), 2);
-                double cap = m_SprintCapacities[s].TryGetValue(rname, out var rc) ? rc.Development : 0.0;
+                double alloc = Math.Round(m_Allocations.Where(a => a.Sprint == sprintIndex && a.Resource.Equals(rname, StringComparison.OrdinalIgnoreCase)).Sum(a => a.Hours), 2);
+                double cap = m_SprintCapacities[sprintIndex].TryGetValue(rname, out var rc) ? rc.Development : 0.0;
                 double pct = (cap > 0) ? Math.Round(alloc / cap * 100.0, 2) : 0.0;
                 wsPS.Cells[row, col++].Value = alloc;
                 wsPS.Cells[row, col++].Value = cap;
@@ -350,12 +353,12 @@ internal class Simulator
         // ---------------- MaintenanceCapacities ----------------
         WriteTable(wsMaint, new[] { "Sprint", "Resource", "Maintenance_h" });
         row = 2;
-        foreach (int s in sprints)
+        foreach (int sprintIndex in sprintIndexes)
         {
             foreach (var rname in resList)
             {
-                double maint = m_SprintCapacities[s].TryGetValue(rname, out var rc) ? rc.Maintenance : 0.0;
-                wsMaint.Cells[row, 1].Value = s;
+                double maint = m_SprintCapacities[sprintIndex].TryGetValue(rname, out var rc) ? rc.Maintenance : 0.0;
+                wsMaint.Cells[row, 1].Value = sprintIndex + m_iSprintOffset;
                 wsMaint.Cells[row, 2].Value = rname;
                 wsMaint.Cells[row, 3].Value = maint;
                 row++;
@@ -366,12 +369,12 @@ internal class Simulator
         // ---------------- AnalysisCapacities ----------------
         WriteTable(wsAnal, new[] { "Sprint", "Resource", "Analysis_h" });
         row = 2;
-        foreach (int s in sprints)
+        foreach (int sprintIndex in sprintIndexes)
         {
             foreach (var rname in resList)
             {
-                double anal = m_SprintCapacities[s].TryGetValue(rname, out var rc) ? rc.Analysis : 0.0;
-                wsAnal.Cells[row, 1].Value = s;
+                double anal = m_SprintCapacities[sprintIndex].TryGetValue(rname, out var rc) ? rc.Analysis : 0.0;
+                wsAnal.Cells[row, 1].Value = sprintIndex + m_iSprintOffset;
                 wsAnal.Cells[row, 2].Value = rname;
                 wsAnal.Cells[row, 3].Value = anal;
                 row++;
@@ -384,7 +387,7 @@ internal class Simulator
         row = 2;
         foreach (var u in m_Underutilization.OrderBy(x => x.Sprint).ThenBy(x => x.Resource, StringComparer.OrdinalIgnoreCase))
         {
-            wsUnder.Cells[row, 1].Value = u.Sprint;
+            wsUnder.Cells[row, 1].Value = u.Sprint + m_iSprintOffset;
             wsUnder.Cells[row, 2].Value = u.Resource;
             wsUnder.Cells[row, 3].Value = u.Unused;
             wsUnder.Cells[row, 4].Value = u.Reason;
@@ -566,7 +569,7 @@ internal class Simulator
         for (int s = 0; s <= maxSprint; s++)
         {
             float x = plotLeft + s * xStep;
-            string txt = s.ToString(CultureInfo.InvariantCulture);
+            string txt = (s + m_iSprintOffset).ToString(CultureInfo.InvariantCulture);
             canvas.DrawText(txt, x + 2, plotBottom + 20, axisPaint); // small offset
         }
         canvas.DrawText("Sprint number", (plotLeft + plotRight) / 2f - 40, plotBottom + 40, axisPaint);

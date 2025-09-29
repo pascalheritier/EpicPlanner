@@ -18,7 +18,8 @@ internal class FileConfiguration
 
 internal class PlannerConfiguration
 {
-    public DateTime InitialSprintStart { get; set; }
+    public DateTime InitialSprintStartDate { get; set; }
+    public int InitialSprintNumber { get; set; }
     public int SprintDays { get; set; }
     public int SprintCapacityDays { get; set; }
     public int MaxSprintCount { get; set; }

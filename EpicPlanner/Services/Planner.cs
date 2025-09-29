@@ -19,7 +19,7 @@ internal class Planner
     public Planner(AppConfiguration _AppConfiguration, ILoggerFactory _LoggerFactory)
     {
         m_AppConfiguration = _AppConfiguration ?? throw new ArgumentNullException(nameof(_AppConfiguration));
-        this.m_InitialSprintStart = _AppConfiguration.PlannerConfiguration.InitialSprintStart;
+        this.m_InitialSprintStart = _AppConfiguration.PlannerConfiguration.InitialSprintStartDate;
         this.m_iSprintDays = _AppConfiguration.PlannerConfiguration.SprintDays;
         this.m_iSprintCapacityDays = _AppConfiguration.PlannerConfiguration.SprintCapacityDays;
     }
@@ -46,7 +46,13 @@ internal class Planner
             absFetcher,
             m_AppConfiguration.PlannerConfiguration.Holidays);
 
-        var simulator = new Simulator(epics, adjustedCapacities, m_InitialSprintStart, m_iSprintDays, m_AppConfiguration.PlannerConfiguration.MaxSprintCount);
+        var simulator = new Simulator(
+            epics,
+            adjustedCapacities,
+            m_InitialSprintStart,
+            m_iSprintDays,
+            m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
+            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber);
         simulator.Run();
 
         simulator.ExportExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
