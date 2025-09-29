@@ -73,7 +73,16 @@ internal class Simulator
             var sprintEnd = sprintStart.AddDays(m_iSprintDays - 1);
 
             // resource capacity left this sprint
-            var resourceRemaining = new Dictionary<string, ResourceCapacity>(m_SprintCapacities[sprint], StringComparer.OrdinalIgnoreCase);
+            var resourceRemaining = m_SprintCapacities[sprint]
+                .ToDictionary(
+                kv => kv.Key,
+                kv => new ResourceCapacity
+                {
+                    Development = kv.Value.Development,
+                    Maintenance = kv.Value.Maintenance,
+                    Analysis = kv.Value.Analysis
+                },
+                StringComparer.OrdinalIgnoreCase);
 
             // Two passes: In Development first, Others second
             var activeDev = m_Epics.Where(e => e.Remaining > 1e-6 && e.IsInDevelopment && DependencySatisfied(e, sprintStart)).ToList();
