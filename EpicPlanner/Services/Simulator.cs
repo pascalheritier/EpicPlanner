@@ -176,6 +176,37 @@ internal class Simulator
                         }
                     }
                 }
+
+                // After proportional allocation, consume leftover on assigned epics
+                foreach (var rname in resourceRemaining.Keys.ToList())
+                {
+                    double leftover = resourceRemaining[rname].Development;
+                    if (leftover <= 1e-6) continue;
+
+                    // Only epics that are assigned to this resource
+                    var candidates = activeSet
+                        .Where(e => e.Wishes.Any(w => w.Resource.Equals(rname, StringComparison.OrdinalIgnoreCase)) && e.Remaining > 1e-6)
+                        .ToList();
+
+                    foreach (var ep in candidates)
+                    {
+                        if (leftover <= 1e-6) break;
+
+                        double alloc = Math.Min(leftover, ep.Remaining);
+                        if (alloc <= 1e-9) continue;
+
+                        CommitAllocation(ep, sprint, rname, alloc, sprintStart);
+                        leftover -= alloc;
+                        resourceRemaining[rname].Development -= alloc;
+                        if (ep.StartDate == null) ep.StartDate = sprintStart;
+                        if (ep.Remaining <= 1e-6)
+                        {
+                            ep.Remaining = 0;
+                            ep.EndDate = sprintStart;
+                            m_CompletedMap[ep.Name] = ep.EndDate.Value;
+                        }
+                    }
+                }
             }
 
             // Underutilization (why capacity was left unconsumed)
@@ -198,7 +229,7 @@ internal class Simulator
         var alloc = new Allocation(_Epic.Name, _iSprint, _strResource, _dHours, _SprintStartDate);
         _Epic.History.Add(alloc);
         m_Allocations.Add(alloc);
-    } 
+    }
 
     #endregion
 
