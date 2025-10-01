@@ -30,31 +30,40 @@ internal class Planner
 
     public async Task RunAsync()
     {
-        using var package = new ExcelPackage(new FileInfo(m_AppConfiguration.FileConfiguration.InputFilePath));
-        var wsEpics = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName];
-        var wsRes = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputResourcesSheetName];
+        using ExcelPackage package = new(new FileInfo(m_AppConfiguration.FileConfiguration.InputFilePath));
+        ExcelWorksheet wsEpics = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName];
+        ExcelWorksheet wsRes = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputResourcesSheetName];
 
-        var resources = LoadResources(wsRes);
-        var epics = LoadEpics(wsEpics, resources.Keys.ToList());
+        Dictionary<string, ResourceCapacity> resources = LoadResources(wsRes);
+        List<Epic> epics = LoadEpics(wsEpics, resources.Keys.ToList());
 
-        // Adjust resources for absences (for each sprint)
-        var absFetcher = new AbsenceFetcher(
+        RedmineDataFetcher redmineDataFetcher = new(
             m_AppConfiguration.RedmineConfiguration.ServerUrl,
             m_AppConfiguration.RedmineConfiguration.ApiKey);
-        Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = await AdjustCapacitiesForAbsencesAsync(
+
+        // Adjust resources for absences (for each sprint)
+        Dictionary<string, List<(DateTime, DateTime)>> absencesPerResource = await redmineDataFetcher.GetResourcesAbsencesAsync();
+        Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = AdjustCapacitiesForAbsences(
             resources,
-            absFetcher,
+            absencesPerResource,
             m_AppConfiguration.PlannerConfiguration.Holidays);
 
-        var simulator = new Simulator(
+        // Get currently planned hours from Redmine
+        Dictionary<string, double> plannedHoursForInitialSprint = await redmineDataFetcher.GetPlannedHoursForSprintAsync(
+            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
+            m_InitialSprintStart,
+            m_InitialSprintStart.AddDays(m_iSprintDays - 1));
+
+        Simulator simulator = new(
             epics,
             adjustedCapacities,
             m_InitialSprintStart,
             m_iSprintDays,
             m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
-            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber);
-        simulator.Run();
+            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
+            plannedHoursForInitialSprint);
 
+        simulator.Run();
         simulator.ExportExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
         simulator.ExportGanttSprintBased(m_AppConfiguration.FileConfiguration.OutputPngFilePath);
     }
@@ -97,14 +106,12 @@ internal class Planner
         return dict;
     }
 
-    private async Task<Dictionary<int, Dictionary<string, ResourceCapacity>>> AdjustCapacitiesForAbsencesAsync(
+    private Dictionary<int, Dictionary<string, ResourceCapacity>> AdjustCapacitiesForAbsences(
         Dictionary<string, ResourceCapacity> _BaseCapacities,
-        AbsenceFetcher _AbsenceFetcher,
+        Dictionary<string, List<(DateTime, DateTime)>> _AbsencesPerResource,
         IEnumerable<DateTime> _Holidays)
     {
         Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = new();
-        Dictionary<string, List<(DateTime, DateTime)>> absencesPerResource = await _AbsenceFetcher.GetResourcesAbsencesAsync();
-
         for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
         {
             var sprintStart = m_InitialSprintStart.AddDays(sprint * m_iSprintDays).Date;
@@ -122,7 +129,7 @@ internal class Planner
                 double scale = (double)workingDaysInSprint / m_iSprintCapacityDays;
                 userSprintCapacity.AdapteCapacityToScale(scale);
 
-                if (absencesPerResource.TryGetValue(user, out var absList))
+                if (_AbsencesPerResource.TryGetValue(user, out var absList))
                 {
                     foreach (var (start, end) in absList)
                     {

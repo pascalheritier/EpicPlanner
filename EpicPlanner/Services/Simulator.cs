@@ -15,6 +15,7 @@ internal class Simulator
     private readonly int m_iSprintDays;
     private readonly int m_iMaxSprintCount;
     private readonly int m_iSprintOffset;
+    Dictionary<string, double> m_PlannedHours;
 
     private readonly Dictionary<string, DateTime> m_CompletedMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Allocation> m_Allocations = [];
@@ -30,7 +31,8 @@ internal class Simulator
         DateTime _InitialSprintDate,
         int _iSprintDays,
         int _iMaxSprintCount,
-        int _iSprintOffset)
+        int _iSprintOffset,
+        Dictionary<string, double> _PlannedHours)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
@@ -38,6 +40,7 @@ internal class Simulator
         m_iSprintDays = _iSprintDays;
         m_iMaxSprintCount = _iMaxSprintCount;
         m_iSprintOffset = _iSprintOffset;
+        m_PlannedHours = _PlannedHours;
 
         // Mark 0h epics as completed in completedMap
         foreach (var e in _Epics.Where(e => e.Remaining <= 0))
@@ -452,6 +455,28 @@ internal class Simulator
             row++;
         }
         wsOver.Cells.AutoFitColumns();
+
+
+        // ---------------- ScheduledCapacitiesVsPlanned ----------------
+        var wsCompare = p.Workbook.Worksheets.Add($"Sprint{m_iSprintOffset}Comparison");
+        WriteTable(wsCompare, new[] { "Resource", "Capacity_h", "Planned_h", "Diff_h" });
+
+        row = 2;
+        var sprintCap = m_SprintCapacities[0];
+        foreach (var rname in sprintCap.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+        {
+            double cap = sprintCap[rname].Development;
+            double planned = m_PlannedHours.TryGetValue(rname, out var ph) ? ph : 0.0;
+            double diff = cap - planned;
+
+            wsCompare.Cells[row, 1].Value = rname;
+            wsCompare.Cells[row, 2].Value = cap;
+            wsCompare.Cells[row, 3].Value = planned;
+            wsCompare.Cells[row, 4].Value = diff;
+            row++;
+        }
+        wsCompare.Cells.AutoFitColumns();
+
 
         // Save
         p.SaveAs(new FileInfo(_strOutputExcelFilePath));
