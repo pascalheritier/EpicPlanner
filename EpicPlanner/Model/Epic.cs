@@ -3,6 +3,8 @@ using System.Text.RegularExpressions;
 
 namespace EpicPlanner;
 
+internal enum EpicPriority { Normal, High, Urgent }
+
 internal class Epic
 {
     #region Constructor
@@ -30,6 +32,7 @@ internal class Epic
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public List<Allocation> History { get; } = new();
+    public EpicPriority Priority { get; set; } = EpicPriority.Normal;
 
     #endregion
 

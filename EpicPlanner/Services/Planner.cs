@@ -166,41 +166,48 @@ internal class Planner
         int roughCol = headers.FirstOrDefault(kv => kv.Key.Contains("Rough", StringComparison.OrdinalIgnoreCase)).Value;
         int assignedCol = headers.FirstOrDefault(kv => kv.Key.Contains("Assigned to", StringComparison.OrdinalIgnoreCase)).Value;
         int willAssignCol = headers.FirstOrDefault(kv => kv.Key.Contains("Will be assigned", StringComparison.OrdinalIgnoreCase) || kv.Key.Contains("Will be assigne", StringComparison.OrdinalIgnoreCase)).Value;
+        int priorityCol = headers.ContainsKey("Priority") ? headers["Priority"] : 11;
         int depCol = headers.FirstOrDefault(kv => kv.Key.Contains("Epic dependency", StringComparison.OrdinalIgnoreCase) || kv.Key.Contains("Dependency", StringComparison.OrdinalIgnoreCase)).Value;
         int endAnalysisCol = headers.FirstOrDefault(kv => kv.Key.Contains("End of analysis", StringComparison.OrdinalIgnoreCase)).Value;
 
         int rows = _EpicWorksheet.Dimension.End.Row;
         var epics = new List<Epic>();
 
-        for (int r = 2; r <= rows; r++)
+        for (int row = 2; row <= rows; row++)
         {
-            string epicName = _EpicWorksheet.Cells[r, epicCol].GetValue<string>()?.Trim();
+            string epicName = _EpicWorksheet.Cells[row, epicCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(epicName)) continue;
 
-            string state = _EpicWorksheet.Cells[r, stateCol].GetValue<string>() ?? "";
+            string state = _EpicWorksheet.Cells[row, stateCol].GetValue<string>() ?? "";
             double charge = 0.0;
-            double remVal = (remainingCol > 0) ? _EpicWorksheet.Cells[r, remainingCol].GetValue<double>() : 0.0;
-            double roughVal = (roughCol > 0) ? _EpicWorksheet.Cells[r, roughCol].GetValue<double>() : 0.0;
+            double remVal = (remainingCol > 0) ? _EpicWorksheet.Cells[row, remainingCol].GetValue<double>() : 0.0;
+            double roughVal = (roughCol > 0) ? _EpicWorksheet.Cells[row, roughCol].GetValue<double>() : 0.0;
 
             if (remVal > 0)
                 charge = remVal;
             else if (roughVal > 0)
                 charge = roughVal;
 
-            string assigned = assignedCol > 0 ? (_EpicWorksheet.Cells[r, assignedCol].GetValue<string>() ?? "") : "";
-            string willAssign = willAssignCol > 0 ? (_EpicWorksheet.Cells[r, willAssignCol].GetValue<string>() ?? "") : "";
-            string depRaw = depCol > 0 ? (_EpicWorksheet.Cells[r, depCol].GetValue<string>() ?? "") : "";
-            string endAnalysisStr = endAnalysisCol > 0 ? (_EpicWorksheet.Cells[r, endAnalysisCol].GetValue<string>() ?? "") : "";
-
+            string assigned = assignedCol > 0 ? (_EpicWorksheet.Cells[row, assignedCol].GetValue<string>() ?? "") : "";
+            string willAssign = willAssignCol > 0 ? (_EpicWorksheet.Cells[row, willAssignCol].GetValue<string>() ?? "") : "";
+            string depRaw = depCol > 0 ? (_EpicWorksheet.Cells[row, depCol].GetValue<string>() ?? "") : "";
+            string endAnalysisStr = endAnalysisCol > 0 ? (_EpicWorksheet.Cells[row, endAnalysisCol].GetValue<string>() ?? "") : "";
+            string priorityStr = priorityCol > 0 ? (_EpicWorksheet.Cells[row, priorityCol].Text?.Trim() ?? "Normal") : "Normal";
+            EpicPriority priority = priorityStr.ToLower() switch
+            {
+                "urgent" => EpicPriority.Urgent,
+                "high" => EpicPriority.High,
+                _ => EpicPriority.Normal
+            };
             DateTime? endAnalysis = null;
             if (DateTime.TryParse(endAnalysisStr, out var parsed))
                 endAnalysis = parsed;
 
             var epic = new Epic(epicName, state, charge, endAnalysis);
+            epic.Priority = priority;
             epic.ParseAssignments(assigned, willAssign, _ResourceNames);
             epic.ParseDependencies(depRaw);
 
-            // FIX #2: handle 0h epics
             if (epic.Charge <= 0)
             {
                 epic.Remaining = 0;

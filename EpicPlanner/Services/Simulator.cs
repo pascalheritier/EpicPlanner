@@ -118,24 +118,56 @@ internal class Simulator
                     if (reqs.Count == 0) continue;
 
                     double avail = resourceRemaining[rname].Development;
-                    double totalDesired = reqs.Sum(x => x.desired);
-                    double scale = (totalDesired <= avail || totalDesired <= 1e-9) ? 1.0 : (avail / totalDesired);
 
-                    foreach (var (epic, desired, pct) in reqs)
+                    // Group requests by priority
+                    var grouped = reqs
+                        .GroupBy(x => x.epic.Priority)
+                        .OrderByDescending(g => g.Key); // Urgent > High > Normal
+
+                    foreach (var group in grouped)
                     {
-                        if (epic.Remaining <= 1e-6) continue;
-                        double alloc = Math.Min(desired * scale, epic.Remaining);
-                        if (alloc <= 1e-9) continue;
+                        var epicReqs = group.ToList();
+                        if (avail <= 1e-6) break;
 
-                        CommitAllocation(epic, sprint, rname, alloc, sprintStart);
-                        resourceRemaining[rname].Development -= alloc;
-                        if (epic.StartDate == null) epic.StartDate = sprintStart;
-                        if (epic.Remaining <= 1e-6)
+                        // If only one epic of this priority, give it all capacity
+                        if (epicReqs.Count == 1)
                         {
-                            epic.Remaining = 0;
-                            // End date = start of the sprint where the epic was finished
-                            epic.EndDate = sprintStart;
-                            m_CompletedMap[epic.Name] = epic.EndDate.Value;
+                            var (epic, desired, pct) = epicReqs[0];
+                            double alloc = Math.Min(avail, epic.Remaining);
+                            CommitAllocation(epic, sprint, rname, alloc, sprintStart);
+                            avail -= alloc;
+                            resourceRemaining[rname].Development = avail;
+                            if (epic.StartDate == null) epic.StartDate = sprintStart;
+                            if (epic.Remaining <= 1e-6)
+                            {
+                                epic.Remaining = 0;
+                                epic.EndDate = sprintStart;
+                                m_CompletedMap[epic.Name] = epic.EndDate.Value;
+                            }
+                        }
+                        else
+                        {
+                            // Multiple same-priority epics → respect wish %
+                            double totalDesired = epicReqs.Sum(x => x.desired);
+                            double scale = (totalDesired <= avail || totalDesired <= 1e-9) ? 1.0 : (avail / totalDesired);
+
+                            foreach (var (epic, desired, pct) in epicReqs)
+                            {
+                                if (epic.Remaining <= 1e-6) continue;
+                                double alloc = Math.Min(desired * scale, epic.Remaining);
+                                if (alloc <= 1e-9) continue;
+
+                                CommitAllocation(epic, sprint, rname, alloc, sprintStart);
+                                avail -= alloc;
+                                resourceRemaining[rname].Development = avail;
+                                if (epic.StartDate == null) epic.StartDate = sprintStart;
+                                if (epic.Remaining <= 1e-6)
+                                {
+                                    epic.Remaining = 0;
+                                    epic.EndDate = sprintStart;
+                                    m_CompletedMap[epic.Name] = epic.EndDate.Value;
+                                }
+                            }
                         }
                     }
                 }
@@ -256,6 +288,7 @@ internal class Simulator
         {
             Epic = e.Name,
             State = e.State,
+            Priority = e.Priority.ToString(), // <-- new column
             Initial_Charge_h = e.Charge,
             Allocated_total_h = Math.Round(e.History.Sum(h => h.Hours), 2),
             Remaining_after_h = Math.Round(Math.Max(0, e.Remaining), 2),
@@ -268,6 +301,7 @@ internal class Simulator
             {
                 r.Epic,
                 r.State,
+                r.Priority,
                 r.Initial_Charge_h,
                 r.Allocated_total_h,
                 r.Remaining_after_h,
@@ -280,17 +314,18 @@ internal class Simulator
             .ThenBy(r => r.Key.Year).ThenBy(r => r.Key.Num)
             .ToList();
 
-        WriteTable(wsFinal, new[] { "Epic", "State", "Initial_Charge_h", "Allocated_total_h", "Remaining_after_h", "Start_date", "End_date" });
+        WriteTable(wsFinal, new[] { "Epic", "State", "Priority", "Initial_Charge_h", "Allocated_total_h", "Remaining_after_h", "Start_date", "End_date" });
         int row = 2;
         foreach (var r in finalSorted)
         {
             wsFinal.Cells[row, 1].Value = r.Epic;
             wsFinal.Cells[row, 2].Value = r.State;
-            wsFinal.Cells[row, 3].Value = r.Initial_Charge_h;
-            wsFinal.Cells[row, 4].Value = r.Allocated_total_h;
-            wsFinal.Cells[row, 5].Value = r.Remaining_after_h;
-            wsFinal.Cells[row, 6].Value = r.Start_date;
-            wsFinal.Cells[row, 7].Value = r.End_date;
+            wsFinal.Cells[row, 3].Value = r.Priority;   // <-- new
+            wsFinal.Cells[row, 4].Value = r.Initial_Charge_h;
+            wsFinal.Cells[row, 5].Value = r.Allocated_total_h;
+            wsFinal.Cells[row, 6].Value = r.Remaining_after_h;
+            wsFinal.Cells[row, 7].Value = r.Start_date;
+            wsFinal.Cells[row, 8].Value = r.End_date;
             row++;
         }
         wsFinal.Cells.AutoFitColumns();
