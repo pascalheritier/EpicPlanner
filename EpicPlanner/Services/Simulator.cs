@@ -467,16 +467,33 @@ internal class Simulator
         {
             double cap = sprintCap[rname].Development;
             double planned = m_PlannedHours.TryGetValue(rname, out var ph) ? ph : 0.0;
-            double diff = cap - planned;
 
             wsCompare.Cells[row, 1].Value = rname;
             wsCompare.Cells[row, 2].Value = cap;
             wsCompare.Cells[row, 3].Value = planned;
-            wsCompare.Cells[row, 4].Value = diff;
+            wsCompare.Cells[row, 4].Formula = $"=B{row}-C{row}";
+
             row++;
         }
         wsCompare.Cells.AutoFitColumns();
 
+        // Add conditional formatting to Diff_h column
+        int lastRow = row - 1;
+        var diffRange = wsCompare.Cells[2, 4, lastRow, 4]; // from row 2 to last row in column 4 (Diff_h)
+
+        // Rule 1: under-allocation, more negative than -5%
+        var condUnder = diffRange.ConditionalFormatting.AddExpression();
+        condUnder.Formula = "AND(D2<0,ABS(D2)/B2>0.05)";
+        condUnder.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+        condUnder.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightCoral);
+        condUnder.Style.Font.Color.SetColor(System.Drawing.Color.DarkRed);
+
+        // Rule 2: over-allocation, more positive than +15%
+        var condOver = diffRange.ConditionalFormatting.AddExpression();
+        condOver.Formula = "AND(D2>0,D2/B2>0.15)";
+        condOver.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+        condOver.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightYellow);
+        condOver.Style.Font.Color.SetColor(System.Drawing.Color.DarkOrange);
 
         // Save
         p.SaveAs(new FileInfo(_strOutputExcelFilePath));

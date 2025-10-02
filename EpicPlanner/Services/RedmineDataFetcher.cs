@@ -63,7 +63,7 @@ internal class RedmineDataFetcher
         IEnumerable<Issue> issues = await GetIssuesAsync(parameters);
         foreach (var issue in issues)
         {
-            if (issue.AssignedTo == null)
+            if (issue.AssignedTo == null || issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
                 continue;
 
             IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(_C => _C.Name == "Estimation");
