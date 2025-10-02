@@ -82,7 +82,7 @@ internal class Planner
         int nameCol = headers.ContainsKey("Ingénieur") ? headers["Ingénieur"] :
                        headers.ContainsKey("Engineer") ? headers["Engineer"] : 1;
 
-        int devCol = headers.ContainsKey("Heures Dév. Epic") ? headers["Heures Dév. Epic"] : 2;
+        int devCol = headers.ContainsKey("Heures Réalisation Epic") ? headers["Heures Réalisation Epic"] : 2;
         int maintCol = headers.ContainsKey("Heures maintenance") ? headers["Heures maintenance"] : 0;
         int analCol = headers.ContainsKey("Heures Analyse Epic") ? headers["Heures Analyse Epic"] : 0;
 
