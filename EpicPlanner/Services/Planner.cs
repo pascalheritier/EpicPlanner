@@ -31,8 +31,8 @@ internal class Planner
     public async Task RunAsync()
     {
         using ExcelPackage package = new(new FileInfo(m_AppConfiguration.FileConfiguration.InputFilePath));
-        ExcelWorksheet wsEpics = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName];
-        ExcelWorksheet wsRes = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputResourcesSheetName];
+        ExcelWorksheet wsEpics = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName] ?? throw new NullReferenceException($"Worksheet '{m_AppConfiguration.FileConfiguration.InputEpicsSheetName}' could not be found.");
+        ExcelWorksheet wsRes = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputResourcesSheetName] ?? throw new NullReferenceException($"Worksheet '{m_AppConfiguration.FileConfiguration.InputResourcesSheetName}' could not be found.");
 
         Dictionary<string, ResourceCapacity> resources = LoadResources(wsRes);
         List<Epic> epics = LoadEpics(wsEpics, resources.Keys.ToList());
@@ -75,7 +75,7 @@ internal class Planner
 
         for (int c = 1; c <= _ResourceWorksheet.Dimension.End.Column; c++)
         {
-            var h = _ResourceWorksheet.Cells[1, c].GetValue<string>()?.Trim();
+            var h = _ResourceWorksheet.Cells[2, c].GetValue<string>()?.Trim();
             if (!string.IsNullOrWhiteSpace(h)) headers[h] = c;
         }
 
@@ -87,14 +87,14 @@ internal class Planner
         int analCol = headers.ContainsKey("Heures Analyse Epic") ? headers["Heures Analyse Epic"] : 0;
 
         var dict = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
-        for (int r = 2; r <= rows; r++)
+        for (int row = 3; row <= rows; row++)
         {
-            string name = _ResourceWorksheet.Cells[r, nameCol].GetValue<string>()?.Trim();
+            string name = _ResourceWorksheet.Cells[row, nameCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(name)) continue;
 
-            double dev = _ResourceWorksheet.Cells[r, devCol].GetValue<double>();
-            double maint = maintCol > 0 ? _ResourceWorksheet.Cells[r, maintCol].GetValue<double>() : 0;
-            double anal = analCol > 0 ? _ResourceWorksheet.Cells[r, analCol].GetValue<double>() : 0;
+            double dev = _ResourceWorksheet.Cells[row, devCol].GetValue<double>();
+            double maint = maintCol > 0 ? _ResourceWorksheet.Cells[row, maintCol].GetValue<double>() : 0;
+            double anal = analCol > 0 ? _ResourceWorksheet.Cells[row, analCol].GetValue<double>() : 0;
 
             dict[name] = new ResourceCapacity
             {
