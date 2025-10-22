@@ -66,7 +66,7 @@ internal class RedmineDataFetcher
             if (issue.AssignedTo == null || issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
                 continue;
 
-            IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(_C => _C.Name == "Estimation");
+            IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(_C => _C.Name == "Reste à faire");
             if (estimation?.Value == null)
                 continue;
 
