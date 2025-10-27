@@ -20,7 +20,7 @@ internal class Program
         {
             ExcelPackage.License.SetNonCommercialPersonal("Adonite");
 
-            CheckerMode mode = ResolveMode(args);
+            EnumCheckerMode mode = ResolveMode(args);
 
             IServiceCollection services = new ServiceCollection();
             ConfigureServices(services);
@@ -29,7 +29,7 @@ internal class Program
             var runner = serviceProvider.GetRequiredService<CheckingRunner>();
             string reportPath = await runner.RunAsync(mode);
 
-            string modeLabel = mode == CheckerMode.Comparison ? "Comparison" : "Epic states";
+            string modeLabel = mode == EnumCheckerMode.Comparison ? "Comparison" : "Epic states";
             LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, "✅ Check completed");
             LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"{modeLabel} report: {Path.GetFullPath(reportPath)}");
         }
@@ -80,7 +80,7 @@ internal class Program
         return appConfiguration;
     }
 
-    private static CheckerMode ResolveMode(string[] _Args)
+    private static EnumCheckerMode ResolveMode(string[] _Args)
     {
         if (_Args.Length > 1 && _Args[0].Equals("--mode", StringComparison.OrdinalIgnoreCase))
         {
@@ -117,7 +117,7 @@ internal class Program
             if (input is null)
             {
                 Console.WriteLine("No input detected. Defaulting to Comparison mode.");
-                return CheckerMode.Comparison;
+                return EnumCheckerMode.Comparison;
             }
 
             if (TryParseMode(input, out var parsedMode))
@@ -129,9 +129,9 @@ internal class Program
         }
     }
 
-    private static bool TryParseMode(string? _strInput, out CheckerMode _enumMode)
+    private static bool TryParseMode(string? _strInput, out EnumCheckerMode _enumMode)
     {
-        _enumMode = CheckerMode.Comparison;
+        _enumMode = EnumCheckerMode.Comparison;
         if (string.IsNullOrWhiteSpace(_strInput))
         {
             return false;
@@ -144,7 +144,7 @@ internal class Program
             value.Equals("planning", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("plan", StringComparison.OrdinalIgnoreCase))
         {
-            _enumMode = CheckerMode.Comparison;
+            _enumMode = EnumCheckerMode.Comparison;
             return true;
         }
 
@@ -154,7 +154,7 @@ internal class Program
             value.Equals("epic-state", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("review", StringComparison.OrdinalIgnoreCase))
         {
-            _enumMode = CheckerMode.EpicStates;
+            _enumMode = EnumCheckerMode.EpicStates;
             return true;
         }
 
