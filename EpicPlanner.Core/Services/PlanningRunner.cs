@@ -26,7 +26,7 @@ public class PlanningRunner
         PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: false);
         Simulator simulator = snapshot.CreateSimulator();
         simulator.Run();
-        simulator.ExportExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
+        simulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
         simulator.ExportGanttSprintBased(m_AppConfiguration.FileConfiguration.OutputPngFilePath);
     }
 

@@ -26,18 +26,7 @@ public class CheckingRunner
         PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: true);
         Simulator simulator = snapshot.CreateSimulator();
         simulator.Run();
-
-        string basePath = m_AppConfiguration.FileConfiguration.OutputFilePath;
-        string directory = Path.GetDirectoryName(basePath) ?? string.Empty;
-        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(basePath);
-        string extension = Path.GetExtension(basePath);
-        if (string.IsNullOrWhiteSpace(extension))
-        {
-            extension = ".xlsx";
-        }
-
-        string comparisonPath = Path.Combine(directory, $"{fileNameWithoutExtension}_Comparison{extension}");
-        simulator.ExportComparisonReport(comparisonPath);
+        simulator.ExportComparisonReport(m_AppConfiguration.FileConfiguration.OutputFilePath);
     } 
 
     #endregion
