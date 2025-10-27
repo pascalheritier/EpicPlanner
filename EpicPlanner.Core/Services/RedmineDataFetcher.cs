@@ -24,7 +24,7 @@ public class RedmineDataFetcher
     private readonly RedmineManager m_RedmineManager;
     private readonly HttpClient m_HttpClient;
     private readonly SemaphoreSlim m_EpicEnumerationLock = new(1, 1);
-    private Dictionary<string, string>? m_EpicEnumerationCache;
+    private Dictionary<int, string>? m_EpicEnumerationCache;
 
     #endregion
 
@@ -220,9 +220,12 @@ public class RedmineDataFetcher
 
         string trimmedValue = rawValue.Trim();
 
-        Dictionary<string, string> lookup = await GetEpicEnumerationLookupAsync();
-        if (lookup.TryGetValue(trimmedValue, out string? mappedValue))
-            return string.IsNullOrWhiteSpace(mappedValue) ? null : mappedValue.Trim();
+        Dictionary<int, string> lookup = await GetEpicEnumerationLookupAsync();
+        if (int.TryParse(trimmedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int enumId))
+        {
+            if (lookup.TryGetValue(enumId, out string? mappedValue))
+                return string.IsNullOrWhiteSpace(mappedValue) ? null : mappedValue.Trim();
+        }
 
         return trimmedValue;
     }
@@ -305,7 +308,7 @@ public class RedmineDataFetcher
         return Enumerable.Empty<Issue>();
     }
 
-    private async Task<Dictionary<string, string>> GetEpicEnumerationLookupAsync()
+    private async Task<Dictionary<int, string>> GetEpicEnumerationLookupAsync()
     {
         if (m_EpicEnumerationCache != null)
             return m_EpicEnumerationCache;
@@ -318,7 +321,7 @@ public class RedmineDataFetcher
 
             try
             {
-                Dictionary<string, string>? map = await TryFetchEpicEnumerationsAsync().ConfigureAwait(false);
+                Dictionary<int, string>? map = await TryFetchEpicEnumerationsAsync().ConfigureAwait(false);
                 if (map != null)
                 {
                     m_EpicEnumerationCache = map;
@@ -330,7 +333,7 @@ public class RedmineDataFetcher
                 // Swallow exceptions so missing enumeration data does not block planner execution.
             }
 
-            m_EpicEnumerationCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            m_EpicEnumerationCache = new Dictionary<int, string>();
             return m_EpicEnumerationCache;
         }
         finally
@@ -339,47 +342,16 @@ public class RedmineDataFetcher
         }
     }
 
-    private async Task<Dictionary<string, string>?> TryFetchEpicEnumerationsAsync()
+    private async Task<Dictionary<int, string>?> TryFetchEpicEnumerationsAsync()
     {
-        Dictionary<string, string>? map = await TryFetchEpicEnumerationsFromJsonAsync().ConfigureAwait(false);
-        if (map != null && map.Count > 0)
-            return map;
-
-        map = await TryFetchEpicEnumerationsFromCustomFieldsAsync().ConfigureAwait(false);
+        Dictionary<int, string>? map = await TryFetchEpicEnumerationsFromCustomFieldsAsync().ConfigureAwait(false);
         if (map != null && map.Count > 0)
             return map;
 
         return map;
     }
 
-    private async Task<Dictionary<string, string>?> TryFetchEpicEnumerationsFromJsonAsync()
-    {
-        try
-        {
-            using HttpResponseMessage response = await m_HttpClient
-                .GetAsync($"custom_fields/{EpicCustomFieldId}/enumerations.json")
-                .ConfigureAwait(false);
-
-            if (!response.IsSuccessStatusCode)
-                return null;
-
-            await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
-            CustomFieldEnumerationResponse? payload = await JsonSerializer
-                .DeserializeAsync<CustomFieldEnumerationResponse>(stream)
-                .ConfigureAwait(false);
-
-            if (payload?.CustomFieldEnumerations == null || payload.CustomFieldEnumerations.Count == 0)
-                return null;
-
-            return ConvertEnumerationsToLookup(payload.CustomFieldEnumerations);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private async Task<Dictionary<string, string>?> TryFetchEpicEnumerationsFromCustomFieldsAsync()
+    private async Task<Dictionary<int, string>?> TryFetchEpicEnumerationsFromCustomFieldsAsync()
     {
         try
         {
@@ -411,11 +383,13 @@ public class RedmineDataFetcher
                 if (epicField.PossibleValues != null && epicField.PossibleValues.Count > 0)
                 {
                     enumerations = epicField.PossibleValues
-                        .Where(pv => !string.IsNullOrWhiteSpace(pv.Value))
+                        .Where(pv => !string.IsNullOrWhiteSpace(pv.Value) || !string.IsNullOrWhiteSpace(pv.Label))
                         .Select(pv => new CustomFieldEnumeration
                         {
-                            Id = pv.Id ?? TryParseEnumerationId(pv.Value),
-                            Name = pv.Value
+                            Id = TryParseEnumerationId(pv.Value),
+                            Value = pv.Value,
+                            Label = pv.Label,
+                            Name = pv.Label
                         })
                         .ToList();
                 }
@@ -432,36 +406,36 @@ public class RedmineDataFetcher
         }
     }
 
-    private static Dictionary<string, string> ConvertEnumerationsToLookup(IEnumerable<CustomFieldEnumeration> _Enumerations)
+    private static Dictionary<int, string> ConvertEnumerationsToLookup(IEnumerable<CustomFieldEnumeration> _Enumerations)
     {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var map = new Dictionary<int, string>();
         foreach (CustomFieldEnumeration enumeration in _Enumerations)
         {
-            if (enumeration == null || string.IsNullOrWhiteSpace(enumeration.Name))
+            if (enumeration == null)
                 continue;
 
-            string name = enumeration.Name.Trim();
-            if (string.IsNullOrEmpty(name))
+            string? rawValue = enumeration.Value;
+            int id = enumeration.Id > 0
+                ? enumeration.Id
+                : TryParseEnumerationId(rawValue);
+
+            if (id <= 0)
                 continue;
 
-            if (enumeration.Id > 0)
+            string? name = enumeration.Label ?? enumeration.Name;
+            if (string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(rawValue))
             {
-                string idKey = enumeration.Id.ToString(CultureInfo.InvariantCulture);
-                if (!map.ContainsKey(idKey))
-                    map[idKey] = name;
+                string trimmed = rawValue.Trim();
+                if (!string.Equals(trimmed, id.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal))
+                    name = trimmed;
             }
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
 
-            if (!map.ContainsKey(name))
-                map[name] = name;
+            map[id] = name.Trim();
         }
 
         return map;
-    }
-
-    private sealed class CustomFieldEnumerationResponse
-    {
-        [JsonPropertyName("custom_field_enumerations")]
-        public List<CustomFieldEnumeration> CustomFieldEnumerations { get; set; } = new();
     }
 
     private sealed class CustomFieldsResponse
@@ -492,15 +466,21 @@ public class RedmineDataFetcher
 
         [JsonPropertyName("name")]
         public string? Name { get; set; }
+
+        [JsonPropertyName("value")]
+        public string? Value { get; set; }
+
+        [JsonPropertyName("label")]
+        public string? Label { get; set; }
     }
 
     private sealed class CustomFieldPossibleValue
     {
-        [JsonPropertyName("id")]
-        public int? Id { get; set; }
-
         [JsonPropertyName("value")]
         public string? Value { get; set; }
+
+        [JsonPropertyName("label")]
+        public string? Label { get; set; }
     }
 
     private static int TryParseEnumerationId(string? _Value)
