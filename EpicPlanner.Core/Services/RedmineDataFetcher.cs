@@ -371,8 +371,7 @@ public class RedmineDataFetcher
                 return null;
 
             CustomField? epicField = payload.CustomFields
-                .FirstOrDefault(cf => cf.Id == EpicCustomFieldId ||
-                                     cf.Name != null && cf.Name.IndexOf("epic", StringComparison.OrdinalIgnoreCase) >= 0);
+                .FirstOrDefault(cf => cf.Id == EpicCustomFieldId);
 
             if (epicField == null)
                 return null;
