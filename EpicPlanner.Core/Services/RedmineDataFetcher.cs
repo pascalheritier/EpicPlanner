@@ -170,7 +170,7 @@ public class RedmineDataFetcher
 
         string? value = null;
         if (epicField.Values != null)
-            value = epicField.Values.Select(v => v.Info ?? v.Value).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+            value = epicField.Values.Select(v => v.Info ?? v.Info).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
 
         if (string.IsNullOrWhiteSpace(value))
             value = epicField.Value;
@@ -196,31 +196,22 @@ public class RedmineDataFetcher
 
     private async Task<Issue?> GetParentIssueAsync(Issue _Issue, Dictionary<int, Issue> _ParentCache)
     {
-        int? parentId = _Issue.Parent?.Id;
+        int? parentId = _Issue.ParentIssue?.Id;
         if (!parentId.HasValue)
             return null;
 
         if (_ParentCache.TryGetValue(parentId.Value, out Issue? cached))
             return cached;
 
-        Issue? parent = await GetIssueByIdAsync(parentId.Value);
+        var parameters = new NameValueCollection
+        {
+            { RedmineKeys.ISSUE_ID, parentId.Value.ToString() },
+        };
+        Issue? parent = (await GetIssuesAsync(parameters)).FirstOrDefault();
         if (parent != null)
             _ParentCache[parentId.Value] = parent;
 
         return parent;
-    }
-
-    private async Task<Issue?> GetIssueByIdAsync(int _IssueId)
-    {
-        try
-        {
-            string issueId = _IssueId.ToString(CultureInfo.InvariantCulture);
-            return await m_RedmineManager.GetObjectAsync<Issue>(issueId, null);
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static double ExtractRemaining(Issue _Issue)
@@ -237,7 +228,7 @@ public class RedmineDataFetcher
         {
             foreach (var val in estimation.Values)
             {
-                string? raw = val.Info ?? val.Value;
+                string? raw = val.Info ?? val.Info;
                 if (string.IsNullOrWhiteSpace(raw)) continue;
                 if (double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out double parsed))
                     return parsed;
