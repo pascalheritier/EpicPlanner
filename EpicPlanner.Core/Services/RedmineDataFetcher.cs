@@ -81,12 +81,14 @@ public class RedmineDataFetcher
         var summaries = new Dictionary<string, SprintEpicSummary>(StringComparer.OrdinalIgnoreCase);
         IEnumerable<Issue> issues = await GetSprintIssuesAsync(_iSprintNumber);
 
+        var parentCache = new Dictionary<int, Issue>();
+
         foreach (var issue in issues)
         {
             if (issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
                 continue;
 
-            string epicName = ExtractEpicName(issue);
+            string epicName = await ResolveEpicNameAsync(issue, parentCache);
             if (!summaries.TryGetValue(epicName, out var summary))
             {
                 summary = new SprintEpicSummary { Epic = epicName };
@@ -125,37 +127,100 @@ public class RedmineDataFetcher
         return await GetIssuesAsync(parameters);
     }
 
-    private static string ExtractEpicName(Issue _Issue)
+    private async Task<string> ResolveEpicNameAsync(Issue _Issue, Dictionary<int, Issue> _ParentCache)
     {
-        if (_Issue.CustomFields != null)
+        string? direct = ExtractEpicFromCustomField(_Issue);
+        if (!string.IsNullOrWhiteSpace(direct))
+            return direct;
+
+        Issue? parent = await GetParentIssueAsync(_Issue, _ParentCache);
+        if (parent != null)
         {
-            var epicField = _Issue.CustomFields.FirstOrDefault(cf =>
-                cf.Name.Equals("Epic", StringComparison.OrdinalIgnoreCase) ||
-                cf.Name.Equals("Epic name", StringComparison.OrdinalIgnoreCase) ||
-                cf.Name.IndexOf("epic", StringComparison.OrdinalIgnoreCase) >= 0);
-
-            if (epicField != null)
-            {
-                string? value = null;
-                if (epicField.Values != null)
-                    value = epicField.Values.Select(v => v.Info ?? v.Value).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
-
-                if (string.IsNullOrWhiteSpace(value))
-                    value = epicField.Value;
-
-                if (!string.IsNullOrWhiteSpace(value))
-                    return value.Trim();
-            }
+            string? parentValue = ExtractEpicFromCustomField(parent);
+            if (!string.IsNullOrWhiteSpace(parentValue))
+                return parentValue;
         }
 
-        if (!string.IsNullOrWhiteSpace(_Issue.Subject))
+        string? fromSubject = ExtractEpicFromSubject(_Issue);
+        if (!string.IsNullOrWhiteSpace(fromSubject))
+            return fromSubject;
+
+        if (parent != null)
         {
-            var match = Regex.Match(_Issue.Subject, @"\[(?<epic>[^\]]+)\]");
-            if (match.Success)
-                return match.Groups["epic"].Value.Trim();
+            string? parentSubject = ExtractEpicFromSubject(parent);
+            if (!string.IsNullOrWhiteSpace(parentSubject))
+                return parentSubject;
         }
 
         return "(No Epic)";
+    }
+
+    private static string? ExtractEpicFromCustomField(Issue _Issue)
+    {
+        if (_Issue.CustomFields == null)
+            return null;
+
+        var epicField = _Issue.CustomFields.FirstOrDefault(cf =>
+            cf.Name.Equals("Epic", StringComparison.OrdinalIgnoreCase) ||
+            cf.Name.Equals("Epic name", StringComparison.OrdinalIgnoreCase) ||
+            cf.Name.IndexOf("epic", StringComparison.OrdinalIgnoreCase) >= 0);
+
+        if (epicField == null)
+            return null;
+
+        string? value = null;
+        if (epicField.Values != null)
+            value = epicField.Values.Select(v => v.Info ?? v.Value).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+        if (string.IsNullOrWhiteSpace(value))
+            value = epicField.Value;
+
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return value.Trim();
+    }
+
+    private static string? ExtractEpicFromSubject(Issue _Issue)
+    {
+        if (string.IsNullOrWhiteSpace(_Issue.Subject))
+            return null;
+
+        var match = Regex.Match(_Issue.Subject, @"\[(?<epic>[^\]]+)\]");
+        if (!match.Success)
+            return null;
+
+        string value = match.Groups["epic"].Value.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private async Task<Issue?> GetParentIssueAsync(Issue _Issue, Dictionary<int, Issue> _ParentCache)
+    {
+        int? parentId = _Issue.Parent?.Id;
+        if (!parentId.HasValue)
+            return null;
+
+        if (_ParentCache.TryGetValue(parentId.Value, out Issue? cached))
+            return cached;
+
+        Issue? parent = await GetIssueByIdAsync(parentId.Value);
+        if (parent != null)
+            _ParentCache[parentId.Value] = parent;
+
+        return parent;
+    }
+
+    private async Task<Issue?> GetIssueByIdAsync(int _IssueId)
+    {
+        try
+        {
+            string issueId = _IssueId.ToString(CultureInfo.InvariantCulture);
+            return await m_RedmineManager.GetObjectAsync<Issue>(issueId, null);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static double ExtractRemaining(Issue _Issue)
