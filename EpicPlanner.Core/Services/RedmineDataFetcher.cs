@@ -64,11 +64,15 @@ public class RedmineDataFetcher
                 continue;
 
             IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(_Field => _Field.Name == "Reste à faire");
-            if (estimation?.Value == null)
+            if (estimation?.Values == null)
+                continue;
+
+            string? rawHours = estimation.Values.Select(_V => _V.Info).FirstOrDefault(_V => !string.IsNullOrWhiteSpace(_V));
+            if (string.IsNullOrWhiteSpace(rawHours))
                 continue;
 
             string user = issue.AssignedTo.Name;
-            double.TryParse(estimation.Values.Select(_V => _V.Info).First(), out double hours);
+            double.TryParse(rawHours, NumberStyles.Any, CultureInfo.InvariantCulture, out double hours);
             if (!result.ContainsKey(user)) result[user] = 0;
             result[user] += hours;
         }
@@ -82,14 +86,13 @@ public class RedmineDataFetcher
         IEnumerable<Issue> issues = await GetSprintIssuesAsync(_iSprintNumber);
 
         var parentCache = new Dictionary<int, Issue>();
-        var epicLabelCache = new Dictionary<int, string>();
 
         foreach (var issue in issues)
         {
             if (issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
                 continue;
 
-            string epicName = await ResolveEpicNameAsync(issue, parentCache, epicLabelCache);
+            string epicName = await ResolveEpicNameAsync(issue, parentCache);
             if (!summaries.TryGetValue(epicName, out var summary))
             {
                 summary = new SprintEpicSummary { Epic = epicName };
@@ -130,28 +133,27 @@ public class RedmineDataFetcher
 
     private async Task<string> ResolveEpicNameAsync(
         Issue _Issue,
-        Dictionary<int, Issue> _ParentCache,
-        Dictionary<int, string> _EpicLabelCache)
+        Dictionary<int, Issue> _ParentCache)
     {
-        string? direct = await NormalizeEpicNameAsync(ExtractEpicFromCustomField(_Issue), _EpicLabelCache);
+        string? direct = NormalizeEpicName(ExtractEpicFromCustomField(_Issue));
         if (!string.IsNullOrWhiteSpace(direct))
             return direct;
 
         Issue? parent = await GetParentIssueAsync(_Issue, _ParentCache);
         if (parent != null)
         {
-            string? parentValue = await NormalizeEpicNameAsync(ExtractEpicFromCustomField(parent), _EpicLabelCache);
+            string? parentValue = NormalizeEpicName(ExtractEpicFromCustomField(parent));
             if (!string.IsNullOrWhiteSpace(parentValue))
                 return parentValue;
         }
 
-        string? fromSubject = await NormalizeEpicNameAsync(ExtractEpicFromSubject(_Issue), _EpicLabelCache);
+        string? fromSubject = NormalizeEpicName(ExtractEpicFromSubject(_Issue));
         if (!string.IsNullOrWhiteSpace(fromSubject))
             return fromSubject;
 
         if (parent != null)
         {
-            string? parentSubject = await NormalizeEpicNameAsync(ExtractEpicFromSubject(parent), _EpicLabelCache);
+            string? parentSubject = NormalizeEpicName(ExtractEpicFromSubject(parent));
             if (!string.IsNullOrWhiteSpace(parentSubject))
                 return parentSubject;
         }
@@ -159,51 +161,12 @@ public class RedmineDataFetcher
         return "(No Epic)";
     }
 
-    private async Task<string?> NormalizeEpicNameAsync(string? _RawEpicValue, Dictionary<int, string> _EpicLabelCache)
+    private string? NormalizeEpicName(string? _RawEpicValue)
     {
         if (string.IsNullOrWhiteSpace(_RawEpicValue))
             return null;
 
-        string trimmed = _RawEpicValue.Trim();
-
-        if (TryParseEpicIdentifier(trimmed, out int epicId))
-        {
-            if (_EpicLabelCache.TryGetValue(epicId, out var cachedLabel))
-                return cachedLabel;
-
-            Issue? epicIssue = await GetIssueByIdAsync(epicId);
-            if (epicIssue != null)
-            {
-                string label = !string.IsNullOrWhiteSpace(epicIssue.Subject)
-                    ? epicIssue.Subject.Trim()
-                    : $"#{epicIssue.Id}";
-
-                _EpicLabelCache[epicId] = label;
-                return label;
-            }
-        }
-
-        return trimmed;
-    }
-
-    private static bool TryParseEpicIdentifier(string _Value, out int _EpicId)
-    {
-        string raw = _Value.Trim();
-
-        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out _EpicId))
-            return true;
-
-        if (raw.StartsWith("#", StringComparison.Ordinal) &&
-            int.TryParse(raw[1..], NumberStyles.Integer, CultureInfo.InvariantCulture, out _EpicId))
-            return true;
-
-        var match = Regex.Match(raw, @"^(?:EPIC|E)?-?(?<id>\d+)$", RegexOptions.IgnoreCase);
-        if (match.Success &&
-            int.TryParse(match.Groups["id"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _EpicId))
-            return true;
-
-        _EpicId = 0;
-        return false;
+        return _RawEpicValue.Trim();
     }
 
     private static string? ExtractEpicFromCustomField(Issue _Issue)
@@ -211,7 +174,10 @@ public class RedmineDataFetcher
         if (_Issue.CustomFields == null)
             return null;
 
-        var epicField = _Issue.CustomFields.FirstOrDefault(cf =>
+        IssueCustomField? epicField = _Issue.CustomFields
+            .FirstOrDefault(cf => cf.Id == 57);
+
+        epicField ??= _Issue.CustomFields.FirstOrDefault(cf =>
             cf.Name.Equals("Epic", StringComparison.OrdinalIgnoreCase) ||
             cf.Name.Equals("Epic name", StringComparison.OrdinalIgnoreCase) ||
             cf.Name.IndexOf("epic", StringComparison.OrdinalIgnoreCase) >= 0);
@@ -219,17 +185,14 @@ public class RedmineDataFetcher
         if (epicField == null)
             return null;
 
-        string? value = null;
-        if (epicField.Values != null)
-            value = epicField.Values.Select(v => v.Info ?? v.Value).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
-
-        if (string.IsNullOrWhiteSpace(value))
-            value = epicField.Value;
-
-        if (string.IsNullOrWhiteSpace(value))
+        if (epicField.Values == null)
             return null;
 
-        return value.Trim();
+        string? value = epicField.Values
+            .Select(v => v.Info)
+            .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private static string? ExtractEpicFromSubject(Issue _Issue)
@@ -247,7 +210,7 @@ public class RedmineDataFetcher
 
     private async Task<Issue?> GetParentIssueAsync(Issue _Issue, Dictionary<int, Issue> _ParentCache)
     {
-        int? parentId = _Issue.Parent?.Id;
+        int? parentId = _Issue.ParentIssue?.Id;
         if (!parentId.HasValue)
             return null;
 
@@ -263,15 +226,12 @@ public class RedmineDataFetcher
 
     private async Task<Issue?> GetIssueByIdAsync(int _IssueId)
     {
-        try
+        var parameters = new NameValueCollection
         {
-            string issueId = _IssueId.ToString(CultureInfo.InvariantCulture);
-            return await m_RedmineManager.GetObjectAsync<Issue>(issueId, null);
-        }
-        catch
-        {
-            return null;
-        }
+            { RedmineKeys.ISSUE_ID, _IssueId.ToString(CultureInfo.InvariantCulture) }
+        };
+
+        return (await GetIssuesAsync(parameters)).FirstOrDefault();
     }
 
     private static double ExtractRemaining(Issue _Issue)
@@ -280,15 +240,11 @@ public class RedmineDataFetcher
         if (estimation == null)
             return 0.0;
 
-        if (!string.IsNullOrWhiteSpace(estimation.Value) &&
-            double.TryParse(estimation.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double direct))
-            return direct;
-
         if (estimation.Values != null)
         {
             foreach (var val in estimation.Values)
             {
-                string? raw = val.Info ?? val.Value;
+                string? raw = val.Info;
                 if (string.IsNullOrWhiteSpace(raw)) continue;
                 if (double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out double parsed))
                     return parsed;
