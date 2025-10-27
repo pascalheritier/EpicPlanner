@@ -1,11 +1,11 @@
-﻿using OfficeOpenXml;
+using OfficeOpenXml;
 using SkiaSharp;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace EpicPlanner;
+namespace EpicPlanner.Core;
 
-internal class Simulator
+public class Simulator
 {
     #region Members
 
@@ -15,7 +15,7 @@ internal class Simulator
     private readonly int m_iSprintDays;
     private readonly int m_iMaxSprintCount;
     private readonly int m_iSprintOffset;
-    Dictionary<string, double> m_PlannedHours;
+    private readonly Dictionary<string, double> m_PlannedHours;
 
     private readonly Dictionary<string, DateTime> m_CompletedMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Allocation> m_Allocations = [];
@@ -32,7 +32,7 @@ internal class Simulator
         int _iSprintDays,
         int _iMaxSprintCount,
         int _iSprintOffset,
-        Dictionary<string, double> _PlannedHours)
+        Dictionary<string, double>? plannedHours = null)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
@@ -40,7 +40,9 @@ internal class Simulator
         m_iSprintDays = _iSprintDays;
         m_iMaxSprintCount = _iMaxSprintCount;
         m_iSprintOffset = _iSprintOffset;
-        m_PlannedHours = _PlannedHours;
+        m_PlannedHours = plannedHours is not null
+            ? new Dictionary<string, double>(plannedHours, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
         // Mark 0h epics as completed in completedMap
         foreach (var e in _Epics.Where(e => e.Remaining <= 0))
@@ -492,43 +494,46 @@ internal class Simulator
         wsOver.Cells.AutoFitColumns();
 
 
-        // ---------------- ScheduledCapacitiesVsPlanned ----------------
-        var wsCompare = p.Workbook.Worksheets.Add($"Sprint{m_iSprintOffset}Comparison");
-        WriteTable(wsCompare, new[] { "Resource", "Capacity_h", "Planned_h", "Diff_h" });
-
-        row = 2;
-        var sprintCap = m_SprintCapacities[0];
-        foreach (var rname in sprintCap.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+        if (m_PlannedHours.Count > 0)
         {
-            double cap = sprintCap[rname].Development;
-            double planned = m_PlannedHours.TryGetValue(rname, out var ph) ? ph : 0.0;
+            // ---------------- ScheduledCapacitiesVsPlanned ----------------
+            var wsCompare = p.Workbook.Worksheets.Add($"Sprint{m_iSprintOffset}Comparison");
+            WriteTable(wsCompare, new[] { "Resource", "Capacity_h", "Planned_h", "Diff_h" });
 
-            wsCompare.Cells[row, 1].Value = rname;
-            wsCompare.Cells[row, 2].Value = cap;
-            wsCompare.Cells[row, 3].Value = planned;
-            wsCompare.Cells[row, 4].Formula = $"=B{row}-C{row}";
+            row = 2;
+            var sprintCap = m_SprintCapacities[0];
+            foreach (var rname in sprintCap.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+            {
+                double cap = sprintCap[rname].Development;
+                double planned = m_PlannedHours.TryGetValue(rname, out var ph) ? ph : 0.0;
 
-            row++;
+                wsCompare.Cells[row, 1].Value = rname;
+                wsCompare.Cells[row, 2].Value = cap;
+                wsCompare.Cells[row, 3].Value = planned;
+                wsCompare.Cells[row, 4].Formula = $"=B{row}-C{row}";
+
+                row++;
+            }
+            wsCompare.Cells.AutoFitColumns();
+
+            // Add conditional formatting to Diff_h column
+            int lastRow = row - 1;
+            var diffRange = wsCompare.Cells[2, 4, lastRow, 4]; // from row 2 to last row in column 4 (Diff_h)
+
+            // Rule 1: under-allocation, more negative than -5%
+            var condUnder = diffRange.ConditionalFormatting.AddExpression();
+            condUnder.Formula = "AND(D2<0,ABS(D2)/B2>0.05)";
+            condUnder.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+            condUnder.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightCoral);
+            condUnder.Style.Font.Color.SetColor(System.Drawing.Color.DarkRed);
+
+            // Rule 2: over-allocation, more positive than +15%
+            var condOver = diffRange.ConditionalFormatting.AddExpression();
+            condOver.Formula = "AND(D2>0,D2/B2>0.15)";
+            condOver.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+            condOver.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightYellow);
+            condOver.Style.Font.Color.SetColor(System.Drawing.Color.DarkOrange);
         }
-        wsCompare.Cells.AutoFitColumns();
-
-        // Add conditional formatting to Diff_h column
-        int lastRow = row - 1;
-        var diffRange = wsCompare.Cells[2, 4, lastRow, 4]; // from row 2 to last row in column 4 (Diff_h)
-
-        // Rule 1: under-allocation, more negative than -5%
-        var condUnder = diffRange.ConditionalFormatting.AddExpression();
-        condUnder.Formula = "AND(D2<0,ABS(D2)/B2>0.05)";
-        condUnder.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
-        condUnder.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightCoral);
-        condUnder.Style.Font.Color.SetColor(System.Drawing.Color.DarkRed);
-
-        // Rule 2: over-allocation, more positive than +15%
-        var condOver = diffRange.ConditionalFormatting.AddExpression();
-        condOver.Formula = "AND(D2>0,D2/B2>0.15)";
-        condOver.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
-        condOver.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightYellow);
-        condOver.Style.Font.Color.SetColor(System.Drawing.Color.DarkOrange);
 
         // Save
         p.SaveAs(new FileInfo(_strOutputExcelFilePath));
@@ -542,6 +547,54 @@ internal class Simulator
             _Worksheet.Cells[1, i + 1].Value = _Headers[i];
             _Worksheet.Cells[1, i + 1].Style.Font.Bold = true;
         }
+    }
+
+    public void ExportComparisonReport(string outputExcelPath)
+    {
+        using ExcelPackage package = new();
+        var worksheet = package.Workbook.Worksheets.Add($"Sprint{m_iSprintOffset}Comparison");
+        WriteTable(worksheet, new[] { "Resource", "Capacity_h", "Planned_h", "Diff_h" });
+
+        int row = 2;
+        var sprintCapacities = m_SprintCapacities[0];
+        foreach (var resourceName in sprintCapacities.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+        {
+            double capacity = sprintCapacities[resourceName].Development;
+            double planned = m_PlannedHours.TryGetValue(resourceName, out var plannedHours) ? plannedHours : 0.0;
+
+            worksheet.Cells[row, 1].Value = resourceName;
+            worksheet.Cells[row, 2].Value = capacity;
+            worksheet.Cells[row, 3].Value = planned;
+            worksheet.Cells[row, 4].Formula = $"=B{row}-C{row}";
+
+            row++;
+        }
+
+        worksheet.Cells.AutoFitColumns();
+
+        if (row > 2)
+        {
+            int lastRow = row - 1;
+            var diffRange = worksheet.Cells[2, 4, lastRow, 4];
+
+            var condUnder = diffRange.ConditionalFormatting.AddExpression();
+            condUnder.Formula = "AND(D2<0,ABS(D2)/B2>0.05)";
+            condUnder.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+            condUnder.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightCoral);
+            condUnder.Style.Font.Color.SetColor(System.Drawing.Color.DarkRed);
+
+            var condOver = diffRange.ConditionalFormatting.AddExpression();
+            condOver.Formula = "AND(D2>0,D2/B2>0.15)";
+            condOver.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+            condOver.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightYellow);
+            condOver.Style.Font.Color.SetColor(System.Drawing.Color.DarkOrange);
+        }
+        else
+        {
+            worksheet.Cells[2, 1].Value = "No planned hours available.";
+        }
+
+        package.SaveAs(new FileInfo(outputExcelPath));
     }
 
     public void ExportGanttSprintBased(string _strOutputPngPath)

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -8,18 +8,20 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="NLog.config" />
+    <ProjectReference Include="../EpicPlanner.Core/EpicPlanner.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="EPPlus" Version="8.1.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.9" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.9" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.9" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.9" />
     <PackageReference Include="NLog.Extensions.Logging" Version="6.0.4" />
-    <PackageReference Include="redmine-api-signed" Version="4.50.0" />
-    <PackageReference Include="SkiaSharp" Version="3.119.1-preview.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="NLog.config" />
   </ItemGroup>
 
   <ItemGroup>

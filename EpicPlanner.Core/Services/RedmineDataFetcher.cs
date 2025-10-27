@@ -1,42 +1,29 @@
-﻿using Redmine.Net.Api;
+using Redmine.Net.Api;
 using Redmine.Net.Api.Net;
 using Redmine.Net.Api.Types;
 using System.Collections.Specialized;
 
-namespace EpicPlanner;
+namespace EpicPlanner.Core;
 
-internal class RedmineDataFetcher
+public class RedmineDataFetcher
 {
-    #region Members
-
     private readonly RedmineManager m_RedmineManager;
 
-    #endregion
-
-    #region Constructor
-
-    public RedmineDataFetcher(string _strBaseUrl, string _strApiKey)
+    public RedmineDataFetcher(string baseUrl, string apiKey)
     {
         m_RedmineManager = new RedmineManager(new RedmineManagerOptionsBuilder()
-            .WithHost(_strBaseUrl)
-            .WithApiKeyAuthentication(_strApiKey));
+            .WithHost(baseUrl)
+            .WithApiKeyAuthentication(apiKey));
     }
 
-    #endregion
-
-    #region Redmine data fetching
-
-    /// <summary>
-    /// Get all accepted vacation absences for all resources
-    /// </summary>
     public async Task<Dictionary<string, List<(DateTime Start, DateTime End)>>> GetResourcesAbsencesAsync()
     {
         Dictionary<string, List<(DateTime, DateTime)>> result = new();
         var parameters = new NameValueCollection
-            {
-                { RedmineKeys.TRACKER_ID, "7" }, // Tracker ID for Absence
-                { RedmineKeys.STATUS_ID, "9" } // Accepted state
-            };
+        {
+            { RedmineKeys.TRACKER_ID, "7" },
+            { RedmineKeys.STATUS_ID, "9" }
+        };
 
         IEnumerable<Issue> issues = await GetIssuesAsync(parameters);
         foreach (var issue in issues)
@@ -56,8 +43,8 @@ internal class RedmineDataFetcher
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         var parameters = new NameValueCollection
         {
-            { RedmineKeys.TRACKER_ID, "6" }, // Tracker ID for TODO
-            { RedmineKeys.FIXED_VERSION_ID, (184 + sprintNumber).ToString() } // Sprint version IDs start at 185 for Sprint 1
+            { RedmineKeys.TRACKER_ID, "6" },
+            { RedmineKeys.FIXED_VERSION_ID, (184 + sprintNumber).ToString() }
         };
 
         IEnumerable<Issue> issues = await GetIssuesAsync(parameters);
@@ -66,12 +53,12 @@ internal class RedmineDataFetcher
             if (issue.AssignedTo == null || issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
                 continue;
 
-            IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(_C => _C.Name == "Reste à faire");
+            IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(field => field.Name == "Reste à faire");
             if (estimation?.Value == null)
                 continue;
 
             string user = issue.AssignedTo.Name;
-            double.TryParse(estimation.Values.Select(_C => _C.Info).First(), out double hours);
+            double.TryParse(estimation.Values.Select(v => v.Info).First(), out double hours);
             if (!result.ContainsKey(user)) result[user] = 0;
             result[user] += hours;
         }
@@ -79,24 +66,22 @@ internal class RedmineDataFetcher
         return result;
     }
 
-    private async Task<IEnumerable<Issue>> GetIssuesAsync(NameValueCollection _Parameters)
+    private async Task<IEnumerable<Issue>> GetIssuesAsync(NameValueCollection parameters)
     {
         try
         {
             RequestOptions requestOptions = new RequestOptions
             {
-                QueryString = _Parameters
+                QueryString = parameters
             };
-            IEnumerable<Issue> foundIssues = await m_RedmineManager.GetAsync<Issue>(requestOptions);
+            IEnumerable<Issue>? foundIssues = await m_RedmineManager.GetAsync<Issue>(requestOptions);
             if (foundIssues is not null)
                 return foundIssues;
         }
-        catch (Exception e)
+        catch
         {
-            // silent failure, found issue is null
+            // Swallow exception and return empty sequence to keep planner working when Redmine is unreachable.
         }
         return Enumerable.Empty<Issue>();
     }
-
-    #endregion
 }
