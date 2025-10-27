@@ -7,7 +7,13 @@ namespace EpicPlanner.Core;
 
 public class RedmineDataFetcher
 {
+    #region Members
+
     private readonly RedmineManager m_RedmineManager;
+
+    #endregion
+
+    #region Constructor
 
     public RedmineDataFetcher(string _strBaseUrl, string _strApiKey)
     {
@@ -16,13 +22,20 @@ public class RedmineDataFetcher
             .WithApiKeyAuthentication(_strApiKey));
     }
 
+    #endregion
+
+    #region Redmine data fetching
+
+    /// <summary>
+    /// Get all accepted vacation absences for all resources
+    /// </summary>
     public async Task<Dictionary<string, List<(DateTime Start, DateTime End)>>> GetResourcesAbsencesAsync()
     {
         Dictionary<string, List<(DateTime, DateTime)>> result = new();
         var parameters = new NameValueCollection
         {
-            { RedmineKeys.TRACKER_ID, "7" },
-            { RedmineKeys.STATUS_ID, "9" }
+            { RedmineKeys.TRACKER_ID, "7" }, // Tracker ID for Absence
+            { RedmineKeys.STATUS_ID, "9" } // Accepted state
         };
 
         IEnumerable<Issue> issues = await GetIssuesAsync(parameters);
@@ -43,8 +56,8 @@ public class RedmineDataFetcher
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         var parameters = new NameValueCollection
         {
-            { RedmineKeys.TRACKER_ID, "6" },
-            { RedmineKeys.FIXED_VERSION_ID, (184 + _iSprintNumber).ToString() }
+            { RedmineKeys.TRACKER_ID, "6" }, // Tracker ID for TODO
+            { RedmineKeys.FIXED_VERSION_ID, (184 + _iSprintNumber).ToString() } // Sprint version IDs start at 185 for Sprint 1
         };
 
         IEnumerable<Issue> issues = await GetIssuesAsync(parameters);
@@ -53,12 +66,12 @@ public class RedmineDataFetcher
             if (issue.AssignedTo == null || issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
                 continue;
 
-            IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(field => field.Name == "Reste à faire");
+            IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(_Field => _Field.Name == "Reste à faire");
             if (estimation?.Value == null)
                 continue;
 
             string user = issue.AssignedTo.Name;
-            double.TryParse(estimation.Values.Select(v => v.Info).First(), out double hours);
+            double.TryParse(estimation.Values.Select(_V => _V.Info).First(), out double hours);
             if (!result.ContainsKey(user)) result[user] = 0;
             result[user] += hours;
         }
@@ -83,5 +96,7 @@ public class RedmineDataFetcher
             // Swallow exception and return empty sequence to keep planner working when Redmine is unreachable.
         }
         return Enumerable.Empty<Issue>();
-    }
+    } 
+
+    #endregion
 }
