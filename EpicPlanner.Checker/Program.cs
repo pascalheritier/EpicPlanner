@@ -1,5 +1,4 @@
 using EpicPlanner.Core;
-using System.IO;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -8,7 +7,7 @@ using NLog.Config;
 using NLog.Extensions.Logging;
 using OfficeOpenXml;
 
-namespace EpicPlanner.CheckerApp;
+namespace EpicPlanner.Checker;
 
 internal class Program
 {
@@ -19,7 +18,6 @@ internal class Program
     {
         try
         {
-            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
             ExcelPackage.License.SetNonCommercialPersonal("Adonite");
 
             IServiceCollection services = new ServiceCollection();
