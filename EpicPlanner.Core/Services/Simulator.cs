@@ -1,5 +1,6 @@
 using OfficeOpenXml;
 using SkiaSharp;
+using System;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -16,6 +17,7 @@ public class Simulator
     private readonly int m_iMaxSprintCount;
     private readonly int m_iSprintOffset;
     private readonly Dictionary<string, double> m_PlannedHours;
+    private readonly IReadOnlyList<SprintEpicSummary> m_EpicSummaries;
 
     private readonly Dictionary<string, DateTime> m_CompletedMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Allocation> m_Allocations = [];
@@ -32,7 +34,8 @@ public class Simulator
         int _iSprintDays,
         int _iMaxSprintCount,
         int _iSprintOffset,
-        Dictionary<string, double>? _PlannedHours = null)
+        Dictionary<string, double>? _PlannedHours = null,
+        IReadOnlyList<SprintEpicSummary>? _EpicSummaries = null)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
@@ -43,6 +46,7 @@ public class Simulator
         m_PlannedHours = _PlannedHours is not null
             ? new Dictionary<string, double>(_PlannedHours, StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        m_EpicSummaries = _EpicSummaries ?? Array.Empty<SprintEpicSummary>();
 
         // Mark 0h epics as completed in completedMap
         foreach (var e in _Epics.Where(e => e.Remaining <= 0))
@@ -549,6 +553,65 @@ public class Simulator
         else
         {
             worksheet.Cells[2, 1].Value = "No planned hours available.";
+        }
+
+        if (m_EpicSummaries.Count > 0)
+        {
+            var epicSheet = package.Workbook.Worksheets.Add($"Sprint{m_iSprintOffset}EpicCheck");
+            WriteTable(epicSheet, new[]
+            {
+                "Epic",
+                "Planned_capacity_h",
+                "Consumed_h",
+                "Remaining_h",
+                "Expected_remaining_h",
+                "Overhead_h",
+                "Overhead_pct"
+            });
+
+            int epicRow = 2;
+            foreach (var summary in m_EpicSummaries
+                         .OrderBy(s => s.Epic, StringComparer.OrdinalIgnoreCase))
+            {
+                epicSheet.Cells[epicRow, 1].Value = summary.Epic;
+                epicSheet.Cells[epicRow, 2].Value = Math.Round(summary.PlannedCapacity, 2);
+                epicSheet.Cells[epicRow, 3].Value = Math.Round(summary.Consumed, 2);
+                epicSheet.Cells[epicRow, 4].Value = Math.Round(summary.Remaining, 2);
+                epicSheet.Cells[epicRow, 5].Value = Math.Round(summary.ExpectedRemaining, 2);
+                epicSheet.Cells[epicRow, 6].Value = Math.Round(summary.OverheadHours, 2);
+                epicSheet.Cells[epicRow, 7].Value = summary.OverheadRatio;
+                epicSheet.Cells[epicRow, 7].Style.Numberformat.Format = "0.00%";
+                epicRow++;
+            }
+
+            if (epicRow > 2)
+            {
+                int lastEpicRow = epicRow - 1;
+                var diffRange = epicSheet.Cells[2, 6, lastEpicRow, 6];
+                var pctRange = epicSheet.Cells[2, 7, lastEpicRow, 7];
+
+                var condOver = diffRange.ConditionalFormatting.AddExpression();
+                condOver.Formula = "F2>0";
+                condOver.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+                condOver.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightCoral);
+                condOver.Style.Font.Color.SetColor(System.Drawing.Color.DarkRed);
+
+                var condUnder = diffRange.ConditionalFormatting.AddExpression();
+                condUnder.Formula = "F2<0";
+                condUnder.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+                condUnder.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightGreen);
+                condUnder.Style.Font.Color.SetColor(System.Drawing.Color.DarkGreen);
+
+                var condPct = pctRange.ConditionalFormatting.AddExpression();
+                condPct.Formula = "ABS(G2)>0.05";
+                condPct.Style.Font.Bold = true;
+            }
+            else
+            {
+                epicSheet.Cells[2, 1].Value = "No epic sprint data available.";
+            }
+
+            epicSheet.Cells.AutoFitColumns();
         }
 
         package.SaveAs(new FileInfo(_strOutputExcelPath));

@@ -2,6 +2,9 @@ using Redmine.Net.Api;
 using Redmine.Net.Api.Net;
 using Redmine.Net.Api.Types;
 using System.Collections.Specialized;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace EpicPlanner.Core;
 
@@ -54,13 +57,7 @@ public class RedmineDataFetcher
     public async Task<Dictionary<string, double>> GetPlannedHoursForSprintAsync(int _iSprintNumber, DateTime _SprintStart, DateTime _SprintEnd)
     {
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        var parameters = new NameValueCollection
-        {
-            { RedmineKeys.TRACKER_ID, "6" }, // Tracker ID for TODO
-            { RedmineKeys.FIXED_VERSION_ID, (184 + _iSprintNumber).ToString() } // Sprint version IDs start at 185 for Sprint 1
-        };
-
-        IEnumerable<Issue> issues = await GetIssuesAsync(parameters);
+        IEnumerable<Issue> issues = await GetSprintIssuesAsync(_iSprintNumber);
         foreach (var issue in issues)
         {
             if (issue.AssignedTo == null || issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
@@ -77,6 +74,228 @@ public class RedmineDataFetcher
         }
 
         return result;
+    }
+
+    public async Task<List<SprintEpicSummary>> GetEpicSprintSummariesAsync(int _iSprintNumber, DateTime _SprintStart, DateTime _SprintEnd)
+    {
+        var summaries = new Dictionary<string, SprintEpicSummary>(StringComparer.OrdinalIgnoreCase);
+        IEnumerable<Issue> issues = await GetSprintIssuesAsync(_iSprintNumber);
+
+        var parentCache = new Dictionary<int, Issue>();
+        var epicLabelCache = new Dictionary<int, string>();
+
+        foreach (var issue in issues)
+        {
+            if (issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
+                continue;
+
+            string epicName = await ResolveEpicNameAsync(issue, parentCache, epicLabelCache);
+            if (!summaries.TryGetValue(epicName, out var summary))
+            {
+                summary = new SprintEpicSummary { Epic = epicName };
+                summaries[epicName] = summary;
+            }
+
+            double planned = issue.EstimatedHours ?? 0.0;
+            double consumed = issue.SpentHours ?? 0.0;
+            double remaining = ExtractRemaining(issue);
+
+            if (consumed <= 0 && planned > 0 && remaining >= 0)
+            {
+                double fallback = planned - remaining;
+                if (fallback > consumed)
+                    consumed = fallback;
+            }
+
+            summary.PlannedCapacity += planned;
+            summary.Consumed += consumed;
+            summary.Remaining += remaining;
+        }
+
+        return summaries.Values
+            .OrderBy(s => s.Epic, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private async Task<IEnumerable<Issue>> GetSprintIssuesAsync(int _iSprintNumber)
+    {
+        var parameters = new NameValueCollection
+        {
+            { RedmineKeys.TRACKER_ID, "6" }, // Tracker ID for TODO
+            { RedmineKeys.FIXED_VERSION_ID, (184 + _iSprintNumber).ToString() } // Sprint version IDs start at 185 for Sprint 1
+        };
+
+        return await GetIssuesAsync(parameters);
+    }
+
+    private async Task<string> ResolveEpicNameAsync(
+        Issue _Issue,
+        Dictionary<int, Issue> _ParentCache,
+        Dictionary<int, string> _EpicLabelCache)
+    {
+        string? direct = await NormalizeEpicNameAsync(ExtractEpicFromCustomField(_Issue), _EpicLabelCache);
+        if (!string.IsNullOrWhiteSpace(direct))
+            return direct;
+
+        Issue? parent = await GetParentIssueAsync(_Issue, _ParentCache);
+        if (parent != null)
+        {
+            string? parentValue = await NormalizeEpicNameAsync(ExtractEpicFromCustomField(parent), _EpicLabelCache);
+            if (!string.IsNullOrWhiteSpace(parentValue))
+                return parentValue;
+        }
+
+        string? fromSubject = await NormalizeEpicNameAsync(ExtractEpicFromSubject(_Issue), _EpicLabelCache);
+        if (!string.IsNullOrWhiteSpace(fromSubject))
+            return fromSubject;
+
+        if (parent != null)
+        {
+            string? parentSubject = await NormalizeEpicNameAsync(ExtractEpicFromSubject(parent), _EpicLabelCache);
+            if (!string.IsNullOrWhiteSpace(parentSubject))
+                return parentSubject;
+        }
+
+        return "(No Epic)";
+    }
+
+    private async Task<string?> NormalizeEpicNameAsync(string? _RawEpicValue, Dictionary<int, string> _EpicLabelCache)
+    {
+        if (string.IsNullOrWhiteSpace(_RawEpicValue))
+            return null;
+
+        string trimmed = _RawEpicValue.Trim();
+
+        if (TryParseEpicIdentifier(trimmed, out int epicId))
+        {
+            if (_EpicLabelCache.TryGetValue(epicId, out var cachedLabel))
+                return cachedLabel;
+
+            Issue? epicIssue = await GetIssueByIdAsync(epicId);
+            if (epicIssue != null)
+            {
+                string label = !string.IsNullOrWhiteSpace(epicIssue.Subject)
+                    ? epicIssue.Subject.Trim()
+                    : $"#{epicIssue.Id}";
+
+                _EpicLabelCache[epicId] = label;
+                return label;
+            }
+        }
+
+        return trimmed;
+    }
+
+    private static bool TryParseEpicIdentifier(string _Value, out int _EpicId)
+    {
+        string raw = _Value.Trim();
+
+        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out _EpicId))
+            return true;
+
+        if (raw.StartsWith("#", StringComparison.Ordinal) &&
+            int.TryParse(raw[1..], NumberStyles.Integer, CultureInfo.InvariantCulture, out _EpicId))
+            return true;
+
+        var match = Regex.Match(raw, @"^(?:EPIC|E)?-?(?<id>\d+)$", RegexOptions.IgnoreCase);
+        if (match.Success &&
+            int.TryParse(match.Groups["id"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _EpicId))
+            return true;
+
+        _EpicId = 0;
+        return false;
+    }
+
+    private static string? ExtractEpicFromCustomField(Issue _Issue)
+    {
+        if (_Issue.CustomFields == null)
+            return null;
+
+        var epicField = _Issue.CustomFields.FirstOrDefault(cf =>
+            cf.Name.Equals("Epic", StringComparison.OrdinalIgnoreCase) ||
+            cf.Name.Equals("Epic name", StringComparison.OrdinalIgnoreCase) ||
+            cf.Name.IndexOf("epic", StringComparison.OrdinalIgnoreCase) >= 0);
+
+        if (epicField == null)
+            return null;
+
+        string? value = null;
+        if (epicField.Values != null)
+            value = epicField.Values.Select(v => v.Info ?? v.Value).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+        if (string.IsNullOrWhiteSpace(value))
+            value = epicField.Value;
+
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return value.Trim();
+    }
+
+    private static string? ExtractEpicFromSubject(Issue _Issue)
+    {
+        if (string.IsNullOrWhiteSpace(_Issue.Subject))
+            return null;
+
+        var match = Regex.Match(_Issue.Subject, @"\[(?<epic>[^\]]+)\]");
+        if (!match.Success)
+            return null;
+
+        string value = match.Groups["epic"].Value.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private async Task<Issue?> GetParentIssueAsync(Issue _Issue, Dictionary<int, Issue> _ParentCache)
+    {
+        int? parentId = _Issue.Parent?.Id;
+        if (!parentId.HasValue)
+            return null;
+
+        if (_ParentCache.TryGetValue(parentId.Value, out Issue? cached))
+            return cached;
+
+        Issue? parent = await GetIssueByIdAsync(parentId.Value);
+        if (parent != null)
+            _ParentCache[parentId.Value] = parent;
+
+        return parent;
+    }
+
+    private async Task<Issue?> GetIssueByIdAsync(int _IssueId)
+    {
+        try
+        {
+            string issueId = _IssueId.ToString(CultureInfo.InvariantCulture);
+            return await m_RedmineManager.GetObjectAsync<Issue>(issueId, null);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static double ExtractRemaining(Issue _Issue)
+    {
+        IssueCustomField? estimation = _Issue.CustomFields?.FirstOrDefault(_Field => _Field.Name == "Reste à faire");
+        if (estimation == null)
+            return 0.0;
+
+        if (!string.IsNullOrWhiteSpace(estimation.Value) &&
+            double.TryParse(estimation.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double direct))
+            return direct;
+
+        if (estimation.Values != null)
+        {
+            foreach (var val in estimation.Values)
+            {
+                string? raw = val.Info ?? val.Value;
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                if (double.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out double parsed))
+                    return parsed;
+            }
+        }
+
+        return 0.0;
     }
 
     private async Task<IEnumerable<Issue>> GetIssuesAsync(NameValueCollection _Parameters)
