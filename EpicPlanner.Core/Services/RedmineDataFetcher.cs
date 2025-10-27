@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using System.Globalization;
+using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -104,16 +105,20 @@ public class RedmineDataFetcher
         var descriptors = new Dictionary<string, EpicDescriptor>(StringComparer.OrdinalIgnoreCase);
         var sprintRemaining = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
-        IEnumerable<Issue> issues = await GetSprintIssuesAsync(_iSprintNumber);
+        List<Issue> sprintIssues = (await GetSprintIssuesAsync(_iSprintNumber)).ToList();
 
         var parentCache = new Dictionary<int, Issue>();
+        var issueCache = new Dictionary<int, Issue>();
 
-        foreach (var issue in issues)
+        foreach (var issue in sprintIssues)
         {
             if (issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
                 continue;
 
             EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(issue, parentCache).ConfigureAwait(false);
+
+            if (issue.Id > 0)
+                issueCache[issue.Id] = issue;
 
             if (!descriptors.TryGetValue(descriptor.Name, out EpicDescriptor? existing) ||
                 (!existing.HasEnumeration && descriptor.HasEnumeration))
@@ -128,18 +133,9 @@ public class RedmineDataFetcher
             }
 
             double planned = issue.EstimatedHours ?? 0.0;
-            double consumed = issue.SpentHours ?? 0.0;
             double remaining = ExtractRemaining(issue);
 
-            if (consumed <= 0 && planned > 0 && remaining >= 0)
-            {
-                double fallback = planned - remaining;
-                if (fallback > consumed)
-                    consumed = fallback;
-            }
-
             summary.PlannedCapacity += planned;
-            summary.Consumed += consumed;
 
             if (remaining > 0)
             {
@@ -148,6 +144,45 @@ public class RedmineDataFetcher
 
                 sprintRemaining[descriptor.Name] += remaining;
             }
+        }
+
+        List<TimeEntryRecord> timeEntries = await GetTimeEntriesAsync(_SprintStart, _SprintEnd).ConfigureAwait(false);
+        HashSet<string> plannedEpicNames = new(descriptors.Keys, StringComparer.OrdinalIgnoreCase);
+
+        foreach (TimeEntryRecord entry in timeEntries)
+        {
+            if (entry?.Hours <= 0)
+                continue;
+
+            int issueId = entry.Issue?.Id ?? 0;
+            if (issueId <= 0)
+                continue;
+
+            Issue? issue = await GetIssueFromCacheAsync(issueId).ConfigureAwait(false);
+            if (issue == null)
+                continue;
+
+            if (issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
+                continue;
+
+            EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(issue, parentCache).ConfigureAwait(false);
+
+            if (!plannedEpicNames.Contains(descriptor.Name))
+                continue;
+
+            if (!descriptors.TryGetValue(descriptor.Name, out EpicDescriptor? existingDescriptor) ||
+                (!existingDescriptor.HasEnumeration && descriptor.HasEnumeration))
+            {
+                descriptors[descriptor.Name] = descriptor;
+            }
+
+            if (!summaries.TryGetValue(descriptor.Name, out var summary))
+            {
+                summary = new SprintEpicSummary { Epic = descriptor.Name };
+                summaries[descriptor.Name] = summary;
+            }
+
+            summary.Consumed += entry.Hours;
         }
 
         Dictionary<string, double> totalRemaining = await GetTotalRemainingForEpicsAsync(descriptors.Values).ConfigureAwait(false);
@@ -171,6 +206,18 @@ public class RedmineDataFetcher
         return summaries.Values
             .OrderBy(s => s.Epic, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        async Task<Issue?> GetIssueFromCacheAsync(int _IssueId)
+        {
+            if (issueCache.TryGetValue(_IssueId, out Issue? cachedIssue))
+                return cachedIssue;
+
+            Issue? fetchedIssue = await GetIssueByIdAsync(_IssueId).ConfigureAwait(false);
+            if (fetchedIssue != null)
+                issueCache[_IssueId] = fetchedIssue;
+
+            return fetchedIssue;
+        }
     }
 
     private async Task<IEnumerable<Issue>> GetSprintIssuesAsync(int _iSprintNumber)
@@ -182,6 +229,50 @@ public class RedmineDataFetcher
         };
 
         return await GetIssuesAsync(parameters);
+    }
+
+    private async Task<List<TimeEntryRecord>> GetTimeEntriesAsync(DateTime _SprintStart, DateTime _SprintEnd)
+    {
+        var results = new List<TimeEntryRecord>();
+        int offset = 0;
+        const int limit = 100;
+
+        try
+        {
+            while (true)
+            {
+                string url = $"time_entries.json?from={_SprintStart:yyyy-MM-dd}&to={_SprintEnd:yyyy-MM-dd}&offset={offset}&limit={limit}";
+                using HttpResponseMessage response = await m_HttpClient.GetAsync(url).ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
+                    break;
+
+                await using Stream stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                TimeEntriesResponse? payload = await JsonSerializer
+                    .DeserializeAsync<TimeEntriesResponse>(stream, new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    })
+                    .ConfigureAwait(false);
+
+                if (payload?.TimeEntries == null || payload.TimeEntries.Count == 0)
+                    break;
+
+                results.AddRange(payload.TimeEntries.Where(e => e != null));
+
+                offset += payload.TimeEntries.Count;
+
+                int totalCount = payload.TotalCount;
+                if (totalCount <= 0 || offset >= totalCount)
+                    break;
+            }
+        }
+        catch
+        {
+            // Swallow exception and return data fetched so far to avoid blocking planner execution.
+        }
+
+        return results;
     }
 
     private async Task<EpicDescriptor> ResolveEpicDescriptorAsync(
@@ -620,6 +711,42 @@ public class RedmineDataFetcher
 
         [JsonPropertyName("label")]
         public string? Label { get; set; }
+    }
+
+    private sealed class TimeEntriesResponse
+    {
+        [JsonPropertyName("time_entries")]
+        public List<TimeEntryRecord> TimeEntries { get; set; } = new();
+
+        [JsonPropertyName("total_count")]
+        public int TotalCount { get; set; }
+
+        [JsonPropertyName("offset")]
+        public int Offset { get; set; }
+
+        [JsonPropertyName("limit")]
+        public int Limit { get; set; }
+    }
+
+    private sealed class TimeEntryRecord
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        [JsonPropertyName("hours")]
+        public double Hours { get; set; }
+
+        [JsonPropertyName("spent_on")]
+        public DateTime SpentOn { get; set; }
+
+        [JsonPropertyName("issue")]
+        public TimeEntryIssueReference? Issue { get; set; }
+    }
+
+    private sealed class TimeEntryIssueReference
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
     }
 
     private static int TryParseEnumerationId(string? _strValue)
