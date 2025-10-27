@@ -203,14 +203,14 @@ public class RedmineDataFetcher
             .OrderBy(s => s.Epic, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        async Task<Issue?> GetIssueFromCacheAsync(int _IssueId)
+        async Task<Issue?> GetIssueFromCacheAsync(int _iIssueId)
         {
-            if (issueCache.TryGetValue(_IssueId, out Issue? cachedIssue))
+            if (issueCache.TryGetValue(_iIssueId, out Issue? cachedIssue))
                 return cachedIssue;
 
-            Issue? fetchedIssue = await GetIssueByIdAsync(_IssueId).ConfigureAwait(false);
+            Issue? fetchedIssue = await GetIssueByIdAsync(_iIssueId).ConfigureAwait(false);
             if (fetchedIssue != null)
-                issueCache[_IssueId] = fetchedIssue;
+                issueCache[_iIssueId] = fetchedIssue;
 
             return fetchedIssue;
         }
