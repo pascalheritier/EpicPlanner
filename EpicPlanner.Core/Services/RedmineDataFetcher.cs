@@ -375,6 +375,9 @@ public class RedmineDataFetcher
             IEnumerable<Issue> todoChildren = await GetIssuesAsync(parameters).ConfigureAwait(false);
             foreach (Issue child in todoChildren)
             {
+                if (child.Subject.Contains("[Suivi]") || child.Subject.Contains("[Analyse]"))
+                    continue;
+
                 total += ExtractRemaining(child);
             }
         }
