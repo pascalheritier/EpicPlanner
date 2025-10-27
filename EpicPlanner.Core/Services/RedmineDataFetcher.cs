@@ -20,6 +20,7 @@ public class RedmineDataFetcher
     #region Members
 
     private const int EpicCustomFieldId = 57;
+    private const string ParentIdKey = "parent_id";
 
     private readonly RedmineManager m_RedmineManager;
     private readonly HttpClient m_HttpClient;
@@ -328,7 +329,11 @@ public class RedmineDataFetcher
 
         foreach (var group in groupedById)
         {
-            double total = await SumRemainingForEpicByEnumerationIdAsync(group.Key).ConfigureAwait(false);
+            List<Issue> parentIssues = await FetchEpicParentIssuesAsync(group.Key).ConfigureAwait(false);
+            double total = parentIssues.Count > 0
+                ? await SumRemainingFromTodoChildrenAsync(parentIssues).ConfigureAwait(false)
+                : 0.0;
+
             foreach (EpicDescriptor descriptor in group)
             {
                 result[descriptor.Name] = total;
@@ -338,21 +343,46 @@ public class RedmineDataFetcher
         return result;
     }
 
-    private async Task<double> SumRemainingForEpicByEnumerationIdAsync(int _EnumerationId)
+    private async Task<List<Issue>> FetchEpicParentIssuesAsync(int _EnumerationId)
     {
-        var parameters = new NameValueCollection
+        var parents = new Dictionary<int, Issue>();
+        foreach (int trackerId in new[] { 9, 4 })
         {
-            { RedmineKeys.TRACKER_ID, "6" },
-            { $"cf_{EpicCustomFieldId}", _EnumerationId.ToString(CultureInfo.InvariantCulture) },
-            { RedmineKeys.STATUS_ID, "*" }
-        };
+            var parameters = new NameValueCollection
+            {
+                { RedmineKeys.TRACKER_ID, trackerId.ToString(CultureInfo.InvariantCulture) },
+                { $"cf_{EpicCustomFieldId}", _EnumerationId.ToString(CultureInfo.InvariantCulture) },
+                { RedmineKeys.STATUS_ID, "*" }
+            };
 
-        IEnumerable<Issue> issues = await GetIssuesAsync(parameters).ConfigureAwait(false);
+            IEnumerable<Issue> issues = await GetIssuesAsync(parameters).ConfigureAwait(false);
+            foreach (Issue issue in issues)
+            {
+                parents[issue.Id] = issue;
+            }
+        }
 
+        return parents.Values.ToList();
+    }
+
+    private async Task<double> SumRemainingFromTodoChildrenAsync(IEnumerable<Issue> _ParentIssues)
+    {
         double total = 0.0;
-        foreach (Issue issue in issues)
+
+        foreach (Issue parent in _ParentIssues)
         {
-            total += ExtractRemaining(issue);
+            var parameters = new NameValueCollection
+            {
+                { RedmineKeys.TRACKER_ID, "6" },
+                { ParentIdKey, parent.Id.ToString(CultureInfo.InvariantCulture) },
+                { RedmineKeys.STATUS_ID, "*" }
+            };
+
+            IEnumerable<Issue> todoChildren = await GetIssuesAsync(parameters).ConfigureAwait(false);
+            foreach (Issue child in todoChildren)
+            {
+                total += ExtractRemaining(child);
+            }
         }
 
         return total;
