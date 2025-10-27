@@ -9,11 +9,11 @@ public class RedmineDataFetcher
 {
     private readonly RedmineManager m_RedmineManager;
 
-    public RedmineDataFetcher(string baseUrl, string apiKey)
+    public RedmineDataFetcher(string _strBaseUrl, string _strApiKey)
     {
         m_RedmineManager = new RedmineManager(new RedmineManagerOptionsBuilder()
-            .WithHost(baseUrl)
-            .WithApiKeyAuthentication(apiKey));
+            .WithHost(_strBaseUrl)
+            .WithApiKeyAuthentication(_strApiKey));
     }
 
     public async Task<Dictionary<string, List<(DateTime Start, DateTime End)>>> GetResourcesAbsencesAsync()
@@ -38,13 +38,13 @@ public class RedmineDataFetcher
         return result;
     }
 
-    public async Task<Dictionary<string, double>> GetPlannedHoursForSprintAsync(int sprintNumber, DateTime sprintStart, DateTime sprintEnd)
+    public async Task<Dictionary<string, double>> GetPlannedHoursForSprintAsync(int _iSprintNumber, DateTime _SprintStart, DateTime _SprintEnd)
     {
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         var parameters = new NameValueCollection
         {
             { RedmineKeys.TRACKER_ID, "6" },
-            { RedmineKeys.FIXED_VERSION_ID, (184 + sprintNumber).ToString() }
+            { RedmineKeys.FIXED_VERSION_ID, (184 + _iSprintNumber).ToString() }
         };
 
         IEnumerable<Issue> issues = await GetIssuesAsync(parameters);
@@ -66,13 +66,13 @@ public class RedmineDataFetcher
         return result;
     }
 
-    private async Task<IEnumerable<Issue>> GetIssuesAsync(NameValueCollection parameters)
+    private async Task<IEnumerable<Issue>> GetIssuesAsync(NameValueCollection _Parameters)
     {
         try
         {
             RequestOptions requestOptions = new RequestOptions
             {
-                QueryString = parameters
+                QueryString = _Parameters
             };
             IEnumerable<Issue>? foundIssues = await m_RedmineManager.GetAsync<Issue>(requestOptions);
             if (foundIssues is not null)

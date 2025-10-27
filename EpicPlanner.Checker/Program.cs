@@ -49,18 +49,18 @@ internal class Program
         }
     }
 
-    private static void ConfigureServices(IServiceCollection services)
+    private static void ConfigureServices(IServiceCollection _Services)
     {
         IConfiguration config = new ConfigurationBuilder()
             .SetBasePath(Directory.GetCurrentDirectory())
             .AddJsonFile(AppSettingsFileName, optional: true, reloadOnChange: true)
             .Build();
 
-        services.AddSingleton(_ => GetAppConfiguration(config));
-        services.AddSingleton<PlanningDataProvider>();
-        services.AddTransient<CheckingRunner>();
+        _Services.AddSingleton(_ => GetAppConfiguration(config));
+        _Services.AddSingleton<PlanningDataProvider>();
+        _Services.AddTransient<CheckingRunner>();
 
-        services.AddLogging(loggingBuilder =>
+        _Services.AddLogging(loggingBuilder =>
         {
             loggingBuilder.ClearProviders();
             loggingBuilder.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Trace);
@@ -81,10 +81,10 @@ internal class Program
         return XmlLoggingConfiguration.CreateFromXmlString(xml);
     }
 
-    private static AppConfiguration GetAppConfiguration(IConfiguration configuration)
+    private static AppConfiguration GetAppConfiguration(IConfiguration _Configuration)
     {
         AppConfiguration appConfiguration = new();
-        configuration.Bind(appConfiguration);
+        _Configuration.Bind(appConfiguration);
         return appConfiguration;
     }
 }

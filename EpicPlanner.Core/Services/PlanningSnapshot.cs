@@ -7,9 +7,9 @@ public class PlanningSnapshot
     private readonly List<Epic> m_Epics;
     private readonly Dictionary<int, Dictionary<string, ResourceCapacity>> m_SprintCapacities;
     private readonly DateTime m_InitialSprintStart;
-    private readonly int m_SprintDays;
-    private readonly int m_MaxSprintCount;
-    private readonly int m_SprintOffset;
+    private readonly int m_iSprintDays;
+    private readonly int m_iMaxSprintCount;
+    private readonly int m_iSprintOffset;
     private readonly Dictionary<string, double> m_PlannedHours;
 
     #endregion
@@ -28,9 +28,9 @@ public class PlanningSnapshot
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
         m_InitialSprintStart = _InitialSprintStart;
-        m_SprintDays = _iSprintDays;
-        m_MaxSprintCount = _iMaxSprintCount;
-        m_SprintOffset = _iSprintOffset;
+        m_iSprintDays = _iSprintDays;
+        m_iMaxSprintCount = _iMaxSprintCount;
+        m_iSprintOffset = _iSprintOffset;
         m_PlannedHours = _PlannedHours;
     }
 
@@ -44,9 +44,9 @@ public class PlanningSnapshot
             m_Epics,
             m_SprintCapacities,
             m_InitialSprintStart,
-            m_SprintDays,
-            m_MaxSprintCount,
-            m_SprintOffset,
+            m_iSprintDays,
+            m_iMaxSprintCount,
+            m_iSprintOffset,
             m_PlannedHours);
     } 
 

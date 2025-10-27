@@ -5,8 +5,8 @@ public static class BusinessCalendar
     public static bool IsWeekend(DateTime _InputDate) =>
         _InputDate.DayOfWeek == DayOfWeek.Saturday || _InputDate.DayOfWeek == DayOfWeek.Sunday;
 
-    public static bool IsHoliday(DateTime inputDate, IEnumerable<DateTime> holidays) =>
-        holidays != null && holidays.Contains(inputDate.Date);
+    public static bool IsHoliday(DateTime _InputDate, IEnumerable<DateTime> _Holidays) =>
+        _Holidays != null && _Holidays.Contains(_InputDate.Date);
 
     public static int CountWorkingDays(
         DateTime _StartDate,

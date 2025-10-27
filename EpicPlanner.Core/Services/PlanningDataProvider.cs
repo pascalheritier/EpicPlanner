@@ -8,8 +8,8 @@ public class PlanningDataProvider
 
     private readonly AppConfiguration m_AppConfiguration;
     private readonly DateTime m_InitialSprintStart;
-    private readonly int m_SprintDays;
-    private readonly int m_SprintCapacityDays;
+    private readonly int m_iSprintDays;
+    private readonly int m_iSprintCapacityDays;
 
     #endregion
 
@@ -19,8 +19,8 @@ public class PlanningDataProvider
     {
         m_AppConfiguration = _AppConfiguration ?? throw new ArgumentNullException(nameof(_AppConfiguration));
         m_InitialSprintStart = _AppConfiguration.PlannerConfiguration.InitialSprintStartDate;
-        m_SprintDays = _AppConfiguration.PlannerConfiguration.SprintDays;
-        m_SprintCapacityDays = _AppConfiguration.PlannerConfiguration.SprintCapacityDays;
+        m_iSprintDays = _AppConfiguration.PlannerConfiguration.SprintDays;
+        m_iSprintCapacityDays = _AppConfiguration.PlannerConfiguration.SprintCapacityDays;
     }
 
     #endregion
@@ -42,6 +42,7 @@ public class PlanningDataProvider
             m_AppConfiguration.RedmineConfiguration.ServerUrl,
             m_AppConfiguration.RedmineConfiguration.ApiKey);
 
+        // Adjust resources for absences (for each sprint)
         Dictionary<string, List<(DateTime, DateTime)>> absencesPerResource = await redmineDataFetcher.GetResourcesAbsencesAsync();
         Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = AdjustCapacitiesForAbsences(
             resources,
@@ -51,17 +52,18 @@ public class PlanningDataProvider
         Dictionary<string, double> plannedHours = new(StringComparer.OrdinalIgnoreCase);
         if (_bIncludePlannedHours)
         {
+            // Get currently planned hours from Redmine
             plannedHours = await redmineDataFetcher.GetPlannedHoursForSprintAsync(
                 m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
                 m_InitialSprintStart,
-                m_InitialSprintStart.AddDays(m_SprintDays - 1));
+                m_InitialSprintStart.AddDays(m_iSprintDays - 1));
         }
 
         return new PlanningSnapshot(
             epics,
             adjustedCapacities,
             m_InitialSprintStart,
-            m_SprintDays,
+            m_iSprintDays,
             m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
             m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
             plannedHours);
@@ -113,8 +115,8 @@ public class PlanningDataProvider
         Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = new();
         for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
         {
-            var sprintStart = m_InitialSprintStart.AddDays(sprint * m_SprintDays).Date;
-            var sprintEnd = sprintStart.AddDays(m_SprintDays - 1).Date;
+            var sprintStart = m_InitialSprintStart.AddDays(sprint * m_iSprintDays).Date;
+            var sprintEnd = sprintStart.AddDays(m_iSprintDays - 1).Date;
 
             int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, _Holidays);
 
@@ -123,7 +125,7 @@ public class PlanningDataProvider
             foreach (var user in _BaseCapacities.Keys)
             {
                 ResourceCapacity userSprintCapacity = new(_BaseCapacities[user]);
-                double scale = (double)workingDaysInSprint / m_SprintCapacityDays;
+                double scale = (double)workingDaysInSprint / m_iSprintCapacityDays;
                 userSprintCapacity.AdapteCapacityToScale(scale);
 
                 if (_AbsencesPerResource.TryGetValue(user, out var absList))
