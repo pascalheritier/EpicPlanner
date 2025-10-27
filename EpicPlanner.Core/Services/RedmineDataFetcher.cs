@@ -1,14 +1,8 @@
-using System;
-using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Globalization;
-using System.Linq;
-using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using System.Threading;
-using System.Threading.Tasks;
 using Redmine.Net.Api;
 using Redmine.Net.Api.Net;
 using Redmine.Net.Api.Types;
@@ -220,12 +214,12 @@ public class RedmineDataFetcher
         return new EpicDescriptor("(No Epic)", null);
     }
 
-    private static string? NormalizeEpicName(string? _RawEpicValue)
+    private static string? NormalizeEpicName(string? _strRawEpicValue)
     {
-        if (string.IsNullOrWhiteSpace(_RawEpicValue))
+        if (string.IsNullOrWhiteSpace(_strRawEpicValue))
             return null;
 
-        return _RawEpicValue.Trim();
+        return _strRawEpicValue.Trim();
     }
 
     private async Task<EpicCustomFieldValue?> ExtractEpicCustomFieldValueAsync(Issue _Issue)
@@ -299,11 +293,11 @@ public class RedmineDataFetcher
         return parent;
     }
 
-    private async Task<Issue?> GetIssueByIdAsync(int _IssueId)
+    private async Task<Issue?> GetIssueByIdAsync(int _iIssueId)
     {
         var parameters = new NameValueCollection
         {
-            { RedmineKeys.ISSUE_ID, _IssueId.ToString(CultureInfo.InvariantCulture) }
+            { RedmineKeys.ISSUE_ID, _iIssueId.ToString(CultureInfo.InvariantCulture) }
         };
 
         return (await GetIssuesAsync(parameters)).FirstOrDefault();
@@ -343,7 +337,7 @@ public class RedmineDataFetcher
         return result;
     }
 
-    private async Task<List<Issue>> FetchEpicParentIssuesAsync(int _EnumerationId)
+    private async Task<List<Issue>> FetchEpicParentIssuesAsync(int _iEnumerationId)
     {
         var parents = new Dictionary<int, Issue>();
         foreach (int trackerId in new[] { 9, 4 })
@@ -351,7 +345,7 @@ public class RedmineDataFetcher
             var parameters = new NameValueCollection
             {
                 { RedmineKeys.TRACKER_ID, trackerId.ToString(CultureInfo.InvariantCulture) },
-                { $"cf_{EpicCustomFieldId}", _EnumerationId.ToString(CultureInfo.InvariantCulture) },
+                { $"cf_{EpicCustomFieldId}", _iEnumerationId.ToString(CultureInfo.InvariantCulture) },
                 { RedmineKeys.STATUS_ID, "*" }
             };
 
@@ -558,10 +552,10 @@ public class RedmineDataFetcher
 
     private sealed class EpicDescriptor
     {
-        public EpicDescriptor(string name, int? enumerationId)
+        public EpicDescriptor(string _strName, int? _iEnumerationId)
         {
-            Name = name;
-            EnumerationId = enumerationId;
+            Name = _strName;
+            EnumerationId = _iEnumerationId;
         }
 
         public string Name { get; }
@@ -625,12 +619,12 @@ public class RedmineDataFetcher
         public string? Label { get; set; }
     }
 
-    private static int TryParseEnumerationId(string? _Value)
+    private static int TryParseEnumerationId(string? _strValue)
     {
-        if (string.IsNullOrWhiteSpace(_Value))
+        if (string.IsNullOrWhiteSpace(_strValue))
             return 0;
 
-        return int.TryParse(_Value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
+        return int.TryParse(_strValue.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
             ? parsed
             : 0;
     }

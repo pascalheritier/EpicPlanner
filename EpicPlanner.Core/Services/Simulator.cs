@@ -510,20 +510,20 @@ public class Simulator
         }
     }
 
-    public void ExportCheckerReport(string _strOutputExcelPath, CheckerMode _Mode)
+    public void ExportCheckerReport(string _strOutputExcelPath, EnumCheckerMode _enumMode)
     {
         using ExcelPackage package = new();
 
-        switch (_Mode)
+        switch (_enumMode)
         {
-            case CheckerMode.Comparison:
+            case EnumCheckerMode.Comparison:
                 WriteComparisonWorksheet(package);
                 break;
-            case CheckerMode.EpicStates:
+            case EnumCheckerMode.EpicStates:
                 WriteEpicWorksheet(package);
                 break;
             default:
-                throw new ArgumentOutOfRangeException(nameof(_Mode), _Mode, "Unsupported checker mode.");
+                throw new ArgumentOutOfRangeException(nameof(_enumMode), _enumMode, "Unsupported checker mode.");
         }
 
         package.SaveAs(new FileInfo(_strOutputExcelPath));

@@ -129,22 +129,22 @@ internal class Program
         }
     }
 
-    private static bool TryParseMode(string? _Input, out CheckerMode _Mode)
+    private static bool TryParseMode(string? _strInput, out CheckerMode _enumMode)
     {
-        _Mode = CheckerMode.Comparison;
-        if (string.IsNullOrWhiteSpace(_Input))
+        _enumMode = CheckerMode.Comparison;
+        if (string.IsNullOrWhiteSpace(_strInput))
         {
             return false;
         }
 
-        string value = _Input.Trim();
+        string value = _strInput.Trim();
 
         if (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("comparison", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("planning", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("plan", StringComparison.OrdinalIgnoreCase))
         {
-            _Mode = CheckerMode.Comparison;
+            _enumMode = CheckerMode.Comparison;
             return true;
         }
 
@@ -154,7 +154,7 @@ internal class Program
             value.Equals("epic-state", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("review", StringComparison.OrdinalIgnoreCase))
         {
-            _Mode = CheckerMode.EpicStates;
+            _enumMode = CheckerMode.EpicStates;
             return true;
         }
 
