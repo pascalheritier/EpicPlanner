@@ -1,25 +1,33 @@
-using System.IO;
-using System.Linq;
 using OfficeOpenXml;
 
 namespace EpicPlanner.Core;
 
 public class PlanningDataProvider
 {
+    #region Members
+
     private readonly AppConfiguration m_AppConfiguration;
     private readonly DateTime m_InitialSprintStart;
     private readonly int m_SprintDays;
     private readonly int m_SprintCapacityDays;
 
-    public PlanningDataProvider(AppConfiguration appConfiguration)
+    #endregion
+
+    #region Constructor
+
+    public PlanningDataProvider(AppConfiguration _AppConfiguration)
     {
-        m_AppConfiguration = appConfiguration ?? throw new ArgumentNullException(nameof(appConfiguration));
-        m_InitialSprintStart = appConfiguration.PlannerConfiguration.InitialSprintStartDate;
-        m_SprintDays = appConfiguration.PlannerConfiguration.SprintDays;
-        m_SprintCapacityDays = appConfiguration.PlannerConfiguration.SprintCapacityDays;
+        m_AppConfiguration = _AppConfiguration ?? throw new ArgumentNullException(nameof(_AppConfiguration));
+        m_InitialSprintStart = _AppConfiguration.PlannerConfiguration.InitialSprintStartDate;
+        m_SprintDays = _AppConfiguration.PlannerConfiguration.SprintDays;
+        m_SprintCapacityDays = _AppConfiguration.PlannerConfiguration.SprintCapacityDays;
     }
 
-    public async Task<PlanningSnapshot> LoadAsync(bool includePlannedHours)
+    #endregion
+
+    #region Load data
+
+    public async Task<PlanningSnapshot> LoadAsync(bool _bIncludePlannedHours)
     {
         using ExcelPackage package = new(new FileInfo(m_AppConfiguration.FileConfiguration.InputFilePath));
         ExcelWorksheet wsEpics = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName]
@@ -41,7 +49,7 @@ public class PlanningDataProvider
             m_AppConfiguration.PlannerConfiguration.Holidays);
 
         Dictionary<string, double> plannedHours = new(StringComparer.OrdinalIgnoreCase);
-        if (includePlannedHours)
+        if (_bIncludePlannedHours)
         {
             plannedHours = await redmineDataFetcher.GetPlannedHoursForSprintAsync(
                 m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
@@ -59,14 +67,14 @@ public class PlanningDataProvider
             plannedHours);
     }
 
-    private Dictionary<string, ResourceCapacity> LoadResources(ExcelWorksheet resourceWorksheet)
+    private Dictionary<string, ResourceCapacity> LoadResources(ExcelWorksheet _ResourceWorksheet)
     {
-        int rows = resourceWorksheet.Dimension.End.Row;
+        int rows = _ResourceWorksheet.Dimension.End.Row;
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-        for (int c = 1; c <= resourceWorksheet.Dimension.End.Column; c++)
+        for (int c = 1; c <= _ResourceWorksheet.Dimension.End.Column; c++)
         {
-            var h = resourceWorksheet.Cells[2, c].GetValue<string>()?.Trim();
+            var h = _ResourceWorksheet.Cells[2, c].GetValue<string>()?.Trim();
             if (!string.IsNullOrWhiteSpace(h)) headers[h] = c;
         }
 
@@ -80,12 +88,12 @@ public class PlanningDataProvider
         var dict = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
         for (int row = 3; row <= rows; row++)
         {
-            string name = resourceWorksheet.Cells[row, nameCol].GetValue<string>()?.Trim();
+            string name = _ResourceWorksheet.Cells[row, nameCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(name)) continue;
 
-            double dev = resourceWorksheet.Cells[row, devCol].GetValue<double>();
-            double maint = maintCol > 0 ? resourceWorksheet.Cells[row, maintCol].GetValue<double>() : 0;
-            double anal = analCol > 0 ? resourceWorksheet.Cells[row, analCol].GetValue<double>() : 0;
+            double dev = _ResourceWorksheet.Cells[row, devCol].GetValue<double>();
+            double maint = maintCol > 0 ? _ResourceWorksheet.Cells[row, maintCol].GetValue<double>() : 0;
+            double anal = analCol > 0 ? _ResourceWorksheet.Cells[row, analCol].GetValue<double>() : 0;
 
             dict[name] = new ResourceCapacity
             {
@@ -98,9 +106,9 @@ public class PlanningDataProvider
     }
 
     private Dictionary<int, Dictionary<string, ResourceCapacity>> AdjustCapacitiesForAbsences(
-        Dictionary<string, ResourceCapacity> baseCapacities,
-        Dictionary<string, List<(DateTime, DateTime)>> absencesPerResource,
-        IEnumerable<DateTime> holidays)
+        Dictionary<string, ResourceCapacity> _BaseCapacities,
+        Dictionary<string, List<(DateTime, DateTime)>> _AbsencesPerResource,
+        IEnumerable<DateTime> _Holidays)
     {
         Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = new();
         for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
@@ -108,21 +116,21 @@ public class PlanningDataProvider
             var sprintStart = m_InitialSprintStart.AddDays(sprint * m_SprintDays).Date;
             var sprintEnd = sprintStart.AddDays(m_SprintDays - 1).Date;
 
-            int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, holidays);
+            int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, _Holidays);
 
             var sprintCapacities = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var user in baseCapacities.Keys)
+            foreach (var user in _BaseCapacities.Keys)
             {
-                ResourceCapacity userSprintCapacity = new(baseCapacities[user]);
+                ResourceCapacity userSprintCapacity = new(_BaseCapacities[user]);
                 double scale = (double)workingDaysInSprint / m_SprintCapacityDays;
                 userSprintCapacity.AdapteCapacityToScale(scale);
 
-                if (absencesPerResource.TryGetValue(user, out var absList))
+                if (_AbsencesPerResource.TryGetValue(user, out var absList))
                 {
                     foreach (var (start, end) in absList)
                     {
-                        int absentWorkingDays = BusinessCalendar.CountWorkingDaysOverlap(start, end, sprintStart, sprintEnd, holidays);
+                        int absentWorkingDays = BusinessCalendar.CountWorkingDaysOverlap(start, end, sprintStart, sprintEnd, _Holidays);
                         if (absentWorkingDays > 0 && workingDaysInSprint > 0)
                         {
                             userSprintCapacity.AdaptCapacityToAbsences(workingDaysInSprint, absentWorkingDays);
@@ -138,12 +146,12 @@ public class PlanningDataProvider
         return adjustedCapacities;
     }
 
-    private List<Epic> LoadEpics(ExcelWorksheet epicWorksheet, List<string> resourceNames)
+    private List<Epic> LoadEpics(ExcelWorksheet _EpicWorksheet, List<string> _ResourceNames)
     {
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (int c = 1; c <= epicWorksheet.Dimension.End.Column; c++)
+        for (int c = 1; c <= _EpicWorksheet.Dimension.End.Column; c++)
         {
-            var h = epicWorksheet.Cells[1, c].GetValue<string>()?.Trim();
+            var h = _EpicWorksheet.Cells[1, c].GetValue<string>()?.Trim();
             if (!string.IsNullOrWhiteSpace(h)) headers[h] = c;
         }
 
@@ -159,29 +167,29 @@ public class PlanningDataProvider
             || kv.Key.Contains("Dependency", StringComparison.OrdinalIgnoreCase)).Value;
         int endAnalysisCol = headers.FirstOrDefault(kv => kv.Key.Contains("End of analysis", StringComparison.OrdinalIgnoreCase)).Value;
 
-        int rows = epicWorksheet.Dimension.End.Row;
+        int rows = _EpicWorksheet.Dimension.End.Row;
         var epics = new List<Epic>();
 
         for (int row = 2; row <= rows; row++)
         {
-            string epicName = epicWorksheet.Cells[row, epicCol].GetValue<string>()?.Trim();
+            string epicName = _EpicWorksheet.Cells[row, epicCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(epicName)) continue;
 
-            string state = epicWorksheet.Cells[row, stateCol].GetValue<string>() ?? string.Empty;
+            string state = _EpicWorksheet.Cells[row, stateCol].GetValue<string>() ?? string.Empty;
             double charge = 0.0;
-            double remVal = remainingCol > 0 ? epicWorksheet.Cells[row, remainingCol].GetValue<double>() : 0.0;
-            double roughVal = roughCol > 0 ? epicWorksheet.Cells[row, roughCol].GetValue<double>() : 0.0;
+            double remVal = remainingCol > 0 ? _EpicWorksheet.Cells[row, remainingCol].GetValue<double>() : 0.0;
+            double roughVal = roughCol > 0 ? _EpicWorksheet.Cells[row, roughCol].GetValue<double>() : 0.0;
 
             if (remVal > 0)
                 charge = remVal;
             else if (roughVal > 0)
                 charge = roughVal;
 
-            string assigned = assignedCol > 0 ? (epicWorksheet.Cells[row, assignedCol].GetValue<string>() ?? string.Empty) : string.Empty;
-            string willAssign = willAssignCol > 0 ? (epicWorksheet.Cells[row, willAssignCol].GetValue<string>() ?? string.Empty) : string.Empty;
-            string depRaw = depCol > 0 ? (epicWorksheet.Cells[row, depCol].GetValue<string>() ?? string.Empty) : string.Empty;
-            string endAnalysisStr = endAnalysisCol > 0 ? (epicWorksheet.Cells[row, endAnalysisCol].GetValue<string>() ?? string.Empty) : string.Empty;
-            string priorityStr = priorityCol > 0 ? (epicWorksheet.Cells[row, priorityCol].Text?.Trim() ?? "Normal") : "Normal";
+            string assigned = assignedCol > 0 ? (_EpicWorksheet.Cells[row, assignedCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string willAssign = willAssignCol > 0 ? (_EpicWorksheet.Cells[row, willAssignCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string depRaw = depCol > 0 ? (_EpicWorksheet.Cells[row, depCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string endAnalysisStr = endAnalysisCol > 0 ? (_EpicWorksheet.Cells[row, endAnalysisCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string priorityStr = priorityCol > 0 ? (_EpicWorksheet.Cells[row, priorityCol].Text?.Trim() ?? "Normal") : "Normal";
             EpicPriority priority = priorityStr.ToLower() switch
             {
                 "urgent" => EpicPriority.Urgent,
@@ -196,7 +204,7 @@ public class PlanningDataProvider
             {
                 Priority = priority
             };
-            epic.ParseAssignments(assigned, willAssign, resourceNames);
+            epic.ParseAssignments(assigned, willAssign, _ResourceNames);
             epic.ParseDependencies(depRaw);
 
             if (epic.Charge <= 0)
@@ -225,98 +233,7 @@ public class PlanningDataProvider
         }
 
         return epics;
-    }
-}
+    } 
 
-public class PlanningRunner
-{
-    private readonly PlanningDataProvider m_DataProvider;
-    private readonly AppConfiguration m_AppConfiguration;
-
-    public PlanningRunner(PlanningDataProvider dataProvider, AppConfiguration appConfiguration)
-    {
-        m_DataProvider = dataProvider;
-        m_AppConfiguration = appConfiguration;
-    }
-
-    public async Task RunAsync()
-    {
-        PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(includePlannedHours: false);
-        Simulator simulator = snapshot.CreateSimulator();
-        simulator.Run();
-        simulator.ExportExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
-        simulator.ExportGanttSprintBased(m_AppConfiguration.FileConfiguration.OutputPngFilePath);
-    }
-}
-
-public class CheckingRunner
-{
-    private readonly PlanningDataProvider m_DataProvider;
-    private readonly AppConfiguration m_AppConfiguration;
-
-    public CheckingRunner(PlanningDataProvider dataProvider, AppConfiguration appConfiguration)
-    {
-        m_DataProvider = dataProvider;
-        m_AppConfiguration = appConfiguration;
-    }
-
-    public async Task RunAsync()
-    {
-        PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(includePlannedHours: true);
-        Simulator simulator = snapshot.CreateSimulator();
-        simulator.Run();
-
-        string basePath = m_AppConfiguration.FileConfiguration.OutputFilePath;
-        string directory = Path.GetDirectoryName(basePath) ?? string.Empty;
-        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(basePath);
-        string extension = Path.GetExtension(basePath);
-        if (string.IsNullOrWhiteSpace(extension))
-        {
-            extension = ".xlsx";
-        }
-
-        string comparisonPath = Path.Combine(directory, $"{fileNameWithoutExtension}_Comparison{extension}");
-        simulator.ExportComparisonReport(comparisonPath);
-    }
-}
-
-public class PlanningSnapshot
-{
-    private readonly List<Epic> m_Epics;
-    private readonly Dictionary<int, Dictionary<string, ResourceCapacity>> m_SprintCapacities;
-    private readonly DateTime m_InitialSprintStart;
-    private readonly int m_SprintDays;
-    private readonly int m_MaxSprintCount;
-    private readonly int m_SprintOffset;
-    private readonly Dictionary<string, double> m_PlannedHours;
-
-    public PlanningSnapshot(
-        List<Epic> epics,
-        Dictionary<int, Dictionary<string, ResourceCapacity>> sprintCapacities,
-        DateTime initialSprintStart,
-        int sprintDays,
-        int maxSprintCount,
-        int sprintOffset,
-        Dictionary<string, double> plannedHours)
-    {
-        m_Epics = epics;
-        m_SprintCapacities = sprintCapacities;
-        m_InitialSprintStart = initialSprintStart;
-        m_SprintDays = sprintDays;
-        m_MaxSprintCount = maxSprintCount;
-        m_SprintOffset = sprintOffset;
-        m_PlannedHours = plannedHours;
-    }
-
-    public Simulator CreateSimulator()
-    {
-        return new Simulator(
-            m_Epics,
-            m_SprintCapacities,
-            m_InitialSprintStart,
-            m_SprintDays,
-            m_MaxSprintCount,
-            m_SprintOffset,
-            m_PlannedHours);
-    }
+    #endregion
 }

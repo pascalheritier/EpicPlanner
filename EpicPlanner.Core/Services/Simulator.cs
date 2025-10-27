@@ -32,7 +32,7 @@ public class Simulator
         int _iSprintDays,
         int _iMaxSprintCount,
         int _iSprintOffset,
-        Dictionary<string, double>? plannedHours = null)
+        Dictionary<string, double>? _PlannedHours = null)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
@@ -40,8 +40,8 @@ public class Simulator
         m_iSprintDays = _iSprintDays;
         m_iMaxSprintCount = _iMaxSprintCount;
         m_iSprintOffset = _iSprintOffset;
-        m_PlannedHours = plannedHours is not null
-            ? new Dictionary<string, double>(plannedHours, StringComparer.OrdinalIgnoreCase)
+        m_PlannedHours = _PlannedHours is not null
+            ? new Dictionary<string, double>(_PlannedHours, StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
         // Mark 0h epics as completed in completedMap
