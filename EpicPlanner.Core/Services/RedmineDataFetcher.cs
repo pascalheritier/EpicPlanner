@@ -1,10 +1,17 @@
-using Redmine.Net.Api;
-using Redmine.Net.Api.Net;
-using Redmine.Net.Api.Types;
+using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Globalization;
 using System.Linq;
+using System.Net.Http;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Redmine.Net.Api;
+using Redmine.Net.Api.Net;
+using Redmine.Net.Api.Types;
 
 namespace EpicPlanner.Core;
 
@@ -12,7 +19,12 @@ public class RedmineDataFetcher
 {
     #region Members
 
+    private const int EpicCustomFieldId = 57;
+
     private readonly RedmineManager m_RedmineManager;
+    private readonly HttpClient m_HttpClient;
+    private readonly SemaphoreSlim m_EpicEnumerationLock = new(1, 1);
+    private Dictionary<string, string>? m_EpicEnumerationCache;
 
     #endregion
 
@@ -20,9 +32,20 @@ public class RedmineDataFetcher
 
     public RedmineDataFetcher(string _strBaseUrl, string _strApiKey)
     {
+        if (string.IsNullOrWhiteSpace(_strBaseUrl))
+            throw new ArgumentException("Redmine base URL must be provided.", nameof(_strBaseUrl));
+
         m_RedmineManager = new RedmineManager(new RedmineManagerOptionsBuilder()
             .WithHost(_strBaseUrl)
             .WithApiKeyAuthentication(_strApiKey));
+
+        string normalizedBaseUrl = _strBaseUrl.EndsWith("/") ? _strBaseUrl : _strBaseUrl + "/";
+
+        m_HttpClient = new HttpClient
+        {
+            BaseAddress = new Uri(normalizedBaseUrl)
+        };
+        m_HttpClient.DefaultRequestHeaders.Add("X-Redmine-API-Key", _strApiKey);
     }
 
     #endregion
@@ -135,14 +158,14 @@ public class RedmineDataFetcher
         Issue _Issue,
         Dictionary<int, Issue> _ParentCache)
     {
-        string? direct = NormalizeEpicName(ExtractEpicFromCustomField(_Issue));
+        string? direct = NormalizeEpicName(await ExtractEpicFromCustomFieldAsync(_Issue));
         if (!string.IsNullOrWhiteSpace(direct))
             return direct;
 
         Issue? parent = await GetParentIssueAsync(_Issue, _ParentCache);
         if (parent != null)
         {
-            string? parentValue = NormalizeEpicName(ExtractEpicFromCustomField(parent));
+            string? parentValue = NormalizeEpicName(await ExtractEpicFromCustomFieldAsync(parent));
             if (!string.IsNullOrWhiteSpace(parentValue))
                 return parentValue;
         }
@@ -169,13 +192,13 @@ public class RedmineDataFetcher
         return _RawEpicValue.Trim();
     }
 
-    private static string? ExtractEpicFromCustomField(Issue _Issue)
+    private async Task<string?> ExtractEpicFromCustomFieldAsync(Issue _Issue)
     {
         if (_Issue.CustomFields == null)
             return null;
 
         IssueCustomField? epicField = _Issue.CustomFields
-            .FirstOrDefault(cf => cf.Id == 57);
+            .FirstOrDefault(cf => cf.Id == EpicCustomFieldId);
 
         epicField ??= _Issue.CustomFields.FirstOrDefault(cf =>
             cf.Name.Equals("Epic", StringComparison.OrdinalIgnoreCase) ||
@@ -188,11 +211,20 @@ public class RedmineDataFetcher
         if (epicField.Values == null)
             return null;
 
-        string? value = epicField.Values
+        string? rawValue = epicField.Values
             .Select(v => v.Info)
             .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
 
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (string.IsNullOrWhiteSpace(rawValue))
+            return null;
+
+        string trimmedValue = rawValue.Trim();
+
+        Dictionary<string, string> lookup = await GetEpicEnumerationLookupAsync();
+        if (lookup.TryGetValue(trimmedValue, out string? mappedValue))
+            return string.IsNullOrWhiteSpace(mappedValue) ? null : mappedValue.Trim();
+
+        return trimmedValue;
     }
 
     private static string? ExtractEpicFromSubject(Issue _Issue)
@@ -271,7 +303,82 @@ public class RedmineDataFetcher
             // Swallow exception and return empty sequence to keep planner working when Redmine is unreachable.
         }
         return Enumerable.Empty<Issue>();
-    } 
+    }
+
+    private async Task<Dictionary<string, string>> GetEpicEnumerationLookupAsync()
+    {
+        if (m_EpicEnumerationCache != null)
+            return m_EpicEnumerationCache;
+
+        await m_EpicEnumerationLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (m_EpicEnumerationCache != null)
+                return m_EpicEnumerationCache;
+
+            try
+            {
+                using HttpResponseMessage response = await m_HttpClient
+                    .GetAsync($"custom_fields/{EpicCustomFieldId}/enumerations.json")
+                    .ConfigureAwait(false);
+
+                response.EnsureSuccessStatusCode();
+
+                await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                CustomFieldEnumerationResponse? payload = await JsonSerializer
+                    .DeserializeAsync<CustomFieldEnumerationResponse>(stream)
+                    .ConfigureAwait(false);
+
+                if (payload?.CustomFieldEnumerations != null)
+                {
+                    var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (CustomFieldEnumeration enumeration in payload.CustomFieldEnumerations)
+                    {
+                        if (string.IsNullOrWhiteSpace(enumeration.Name))
+                            continue;
+
+                        string name = enumeration.Name.Trim();
+                        string idKey = enumeration.Id.ToString(CultureInfo.InvariantCulture);
+
+                        if (!map.ContainsKey(idKey))
+                            map[idKey] = name;
+
+                        if (!map.ContainsKey(name))
+                            map[name] = name;
+                    }
+
+                    m_EpicEnumerationCache = map;
+                    return m_EpicEnumerationCache;
+                }
+            }
+            catch
+            {
+                // Swallow exceptions so missing enumeration data does not block planner execution.
+            }
+
+            m_EpicEnumerationCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            return m_EpicEnumerationCache;
+        }
+        finally
+        {
+            m_EpicEnumerationLock.Release();
+        }
+    }
+
+    private sealed class CustomFieldEnumerationResponse
+    {
+        [JsonPropertyName("custom_field_enumerations")]
+        public List<CustomFieldEnumeration> CustomFieldEnumerations { get; set; } = new();
+    }
+
+    private sealed class CustomFieldEnumeration
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+    }
 
     #endregion
 }
