@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Globalization;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -25,6 +26,16 @@ public class RedmineDataFetcher
     private readonly HttpClient m_HttpClient;
     private readonly SemaphoreSlim m_EpicEnumerationLock = new(1, 1);
     private Dictionary<string, string>? m_EpicEnumerationCache;
+
+    private static readonly Regex s_EnumerationRowRegex = new(
+        @"custom_field_enumeration_(?<id>\d+)[^>]*>(?<content>.*?)</tr>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    private static readonly Regex s_EnumerationNameCellRegex = new(
+        @"<td[^>]*class\s*=\s*""name""[^>]*>(?<name>.*?)</td>",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+    private static readonly Regex s_HtmlTagRegex = new("<[^>]+>", RegexOptions.Singleline);
 
     #endregion
 
@@ -318,35 +329,9 @@ public class RedmineDataFetcher
 
             try
             {
-                using HttpResponseMessage response = await m_HttpClient
-                    .GetAsync($"custom_fields/{EpicCustomFieldId}/enumerations.json")
-                    .ConfigureAwait(false);
-
-                response.EnsureSuccessStatusCode();
-
-                await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
-                CustomFieldEnumerationResponse? payload = await JsonSerializer
-                    .DeserializeAsync<CustomFieldEnumerationResponse>(stream)
-                    .ConfigureAwait(false);
-
-                if (payload?.CustomFieldEnumerations != null)
+                Dictionary<string, string>? map = await TryFetchEpicEnumerationsAsync().ConfigureAwait(false);
+                if (map != null)
                 {
-                    var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (CustomFieldEnumeration enumeration in payload.CustomFieldEnumerations)
-                    {
-                        if (string.IsNullOrWhiteSpace(enumeration.Name))
-                            continue;
-
-                        string name = enumeration.Name.Trim();
-                        string idKey = enumeration.Id.ToString(CultureInfo.InvariantCulture);
-
-                        if (!map.ContainsKey(idKey))
-                            map[idKey] = name;
-
-                        if (!map.ContainsKey(name))
-                            map[name] = name;
-                    }
-
                     m_EpicEnumerationCache = map;
                     return m_EpicEnumerationCache;
                 }
@@ -363,6 +348,133 @@ public class RedmineDataFetcher
         {
             m_EpicEnumerationLock.Release();
         }
+    }
+
+    private async Task<Dictionary<string, string>?> TryFetchEpicEnumerationsAsync()
+    {
+        Dictionary<string, string>? map = await TryFetchEpicEnumerationsFromJsonAsync().ConfigureAwait(false);
+        if (map != null && map.Count > 0)
+            return map;
+
+        map = await TryFetchEpicEnumerationsFromHtmlAsync().ConfigureAwait(false);
+        if (map != null && map.Count > 0)
+            return map;
+
+        return map;
+    }
+
+    private async Task<Dictionary<string, string>?> TryFetchEpicEnumerationsFromJsonAsync()
+    {
+        try
+        {
+            using HttpResponseMessage response = await m_HttpClient
+                .GetAsync($"custom_fields/{EpicCustomFieldId}/enumerations.json")
+                .ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            CustomFieldEnumerationResponse? payload = await JsonSerializer
+                .DeserializeAsync<CustomFieldEnumerationResponse>(stream)
+                .ConfigureAwait(false);
+
+            if (payload?.CustomFieldEnumerations == null || payload.CustomFieldEnumerations.Count == 0)
+                return null;
+
+            return ConvertEnumerationsToLookup(payload.CustomFieldEnumerations);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<Dictionary<string, string>?> TryFetchEpicEnumerationsFromHtmlAsync()
+    {
+        try
+        {
+            using HttpResponseMessage response = await m_HttpClient
+                .GetAsync($"custom_fields/{EpicCustomFieldId}/enumerations")
+                .ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            string html = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(html))
+                return null;
+
+            var matches = s_EnumerationRowRegex.Matches(html);
+            if (matches.Count == 0)
+                return null;
+
+            var enumerations = new List<CustomFieldEnumeration>(matches.Count);
+            foreach (Match match in matches.Cast<Match>())
+            {
+                string idValue = match.Groups["id"].Value;
+                string content = match.Groups["content"].Value;
+
+                Match nameMatch = s_EnumerationNameCellRegex.Match(content);
+                if (!nameMatch.Success)
+                    continue;
+
+                string nameValue = nameMatch.Groups["name"].Value;
+
+                if (!int.TryParse(idValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int id))
+                    continue;
+
+                string normalizedName = NormalizeHtmlText(nameValue);
+                if (string.IsNullOrWhiteSpace(normalizedName))
+                    continue;
+
+                enumerations.Add(new CustomFieldEnumeration
+                {
+                    Id = id,
+                    Name = normalizedName
+                });
+            }
+
+            if (enumerations.Count == 0)
+                return null;
+
+            return ConvertEnumerationsToLookup(enumerations);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static Dictionary<string, string> ConvertEnumerationsToLookup(IEnumerable<CustomFieldEnumeration> _Enumerations)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (CustomFieldEnumeration enumeration in _Enumerations)
+        {
+            if (enumeration == null || string.IsNullOrWhiteSpace(enumeration.Name))
+                continue;
+
+            string name = enumeration.Name.Trim();
+            string idKey = enumeration.Id.ToString(CultureInfo.InvariantCulture);
+
+            if (!map.ContainsKey(idKey))
+                map[idKey] = name;
+
+            if (!map.ContainsKey(name))
+                map[name] = name;
+        }
+
+        return map;
+    }
+
+    private static string NormalizeHtmlText(string _Value)
+    {
+        if (string.IsNullOrWhiteSpace(_Value))
+            return string.Empty;
+
+        string withoutTags = s_HtmlTagRegex.Replace(_Value, " ");
+        string decoded = WebUtility.HtmlDecode(withoutTags);
+        return Regex.Replace(decoded, "\s+", " ").Trim();
     }
 
     private sealed class CustomFieldEnumerationResponse
