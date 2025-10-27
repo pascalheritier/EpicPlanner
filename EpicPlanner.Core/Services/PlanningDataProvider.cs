@@ -1,38 +1,39 @@
-﻿using Microsoft.Extensions.Logging;
 using OfficeOpenXml;
 
-namespace EpicPlanner;
+namespace EpicPlanner.Core;
 
-internal class Planner
+public class PlanningDataProvider
 {
     #region Members
 
+    private readonly AppConfiguration m_AppConfiguration;
     private readonly DateTime m_InitialSprintStart;
     private readonly int m_iSprintDays;
     private readonly int m_iSprintCapacityDays;
-    private readonly AppConfiguration m_AppConfiguration;
 
     #endregion
 
     #region Constructor
 
-    public Planner(AppConfiguration _AppConfiguration, ILoggerFactory _LoggerFactory)
+    public PlanningDataProvider(AppConfiguration _AppConfiguration)
     {
         m_AppConfiguration = _AppConfiguration ?? throw new ArgumentNullException(nameof(_AppConfiguration));
-        this.m_InitialSprintStart = _AppConfiguration.PlannerConfiguration.InitialSprintStartDate;
-        this.m_iSprintDays = _AppConfiguration.PlannerConfiguration.SprintDays;
-        this.m_iSprintCapacityDays = _AppConfiguration.PlannerConfiguration.SprintCapacityDays;
+        m_InitialSprintStart = _AppConfiguration.PlannerConfiguration.InitialSprintStartDate;
+        m_iSprintDays = _AppConfiguration.PlannerConfiguration.SprintDays;
+        m_iSprintCapacityDays = _AppConfiguration.PlannerConfiguration.SprintCapacityDays;
     }
 
     #endregion
 
-    #region Planning logic
+    #region Load data
 
-    public async Task RunAsync()
+    public async Task<PlanningSnapshot> LoadAsync(bool _bIncludePlannedHours)
     {
         using ExcelPackage package = new(new FileInfo(m_AppConfiguration.FileConfiguration.InputFilePath));
-        ExcelWorksheet wsEpics = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName] ?? throw new NullReferenceException($"Worksheet '{m_AppConfiguration.FileConfiguration.InputEpicsSheetName}' could not be found.");
-        ExcelWorksheet wsRes = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputResourcesSheetName] ?? throw new NullReferenceException($"Worksheet '{m_AppConfiguration.FileConfiguration.InputResourcesSheetName}' could not be found.");
+        ExcelWorksheet wsEpics = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName]
+            ?? throw new NullReferenceException($"Worksheet '{m_AppConfiguration.FileConfiguration.InputEpicsSheetName}' could not be found.");
+        ExcelWorksheet wsRes = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputResourcesSheetName]
+            ?? throw new NullReferenceException($"Worksheet '{m_AppConfiguration.FileConfiguration.InputResourcesSheetName}' could not be found.");
 
         Dictionary<string, ResourceCapacity> resources = LoadResources(wsRes);
         List<Epic> epics = LoadEpics(wsEpics, resources.Keys.ToList());
@@ -48,24 +49,24 @@ internal class Planner
             absencesPerResource,
             m_AppConfiguration.PlannerConfiguration.Holidays);
 
-        // Get currently planned hours from Redmine
-        Dictionary<string, double> plannedHoursForInitialSprint = await redmineDataFetcher.GetPlannedHoursForSprintAsync(
-            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
-            m_InitialSprintStart,
-            m_InitialSprintStart.AddDays(m_iSprintDays - 1));
+        Dictionary<string, double> plannedHours = new(StringComparer.OrdinalIgnoreCase);
+        if (_bIncludePlannedHours)
+        {
+            // Get currently planned hours from Redmine
+            plannedHours = await redmineDataFetcher.GetPlannedHoursForSprintAsync(
+                m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
+                m_InitialSprintStart,
+                m_InitialSprintStart.AddDays(m_iSprintDays - 1));
+        }
 
-        Simulator simulator = new(
+        return new PlanningSnapshot(
             epics,
             adjustedCapacities,
             m_InitialSprintStart,
             m_iSprintDays,
             m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
             m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
-            plannedHoursForInitialSprint);
-
-        simulator.Run();
-        simulator.ExportExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
-        simulator.ExportGanttSprintBased(m_AppConfiguration.FileConfiguration.OutputPngFilePath);
+            plannedHours);
     }
 
     private Dictionary<string, ResourceCapacity> LoadResources(ExcelWorksheet _ResourceWorksheet)
@@ -117,14 +118,12 @@ internal class Planner
             var sprintStart = m_InitialSprintStart.AddDays(sprint * m_iSprintDays).Date;
             var sprintEnd = sprintStart.AddDays(m_iSprintDays - 1).Date;
 
-            // Compute how many working days exist in this sprint
             int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, _Holidays);
 
             var sprintCapacities = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var user in _BaseCapacities.Keys)
             {
-                // Start from base sprint hours, scaled to real working days
                 ResourceCapacity userSprintCapacity = new(_BaseCapacities[user]);
                 double scale = (double)workingDaysInSprint / m_iSprintCapacityDays;
                 userSprintCapacity.AdapteCapacityToScale(scale);
@@ -133,10 +132,10 @@ internal class Planner
                 {
                     foreach (var (start, end) in absList)
                     {
-                        int absentWD = BusinessCalendar.CountWorkingDaysOverlap(start, end, sprintStart, sprintEnd, _Holidays);
-                        if (absentWD > 0 && workingDaysInSprint > 0)
+                        int absentWorkingDays = BusinessCalendar.CountWorkingDaysOverlap(start, end, sprintStart, sprintEnd, _Holidays);
+                        if (absentWorkingDays > 0 && workingDaysInSprint > 0)
                         {
-                            userSprintCapacity.AdaptCapacityToAbsences(workingDaysInSprint, absentWD);
+                            userSprintCapacity.AdaptCapacityToAbsences(workingDaysInSprint, absentWorkingDays);
                         }
                     }
                 }
@@ -149,10 +148,8 @@ internal class Planner
         return adjustedCapacities;
     }
 
-
     private List<Epic> LoadEpics(ExcelWorksheet _EpicWorksheet, List<string> _ResourceNames)
     {
-        // Detect headers
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int c = 1; c <= _EpicWorksheet.Dimension.End.Column; c++)
         {
@@ -165,9 +162,11 @@ internal class Planner
         int remainingCol = headers.FirstOrDefault(kv => kv.Key.Contains("Remaining", StringComparison.OrdinalIgnoreCase)).Value;
         int roughCol = headers.FirstOrDefault(kv => kv.Key.Contains("Rough", StringComparison.OrdinalIgnoreCase)).Value;
         int assignedCol = headers.FirstOrDefault(kv => kv.Key.Contains("Assigned to", StringComparison.OrdinalIgnoreCase)).Value;
-        int willAssignCol = headers.FirstOrDefault(kv => kv.Key.Contains("Will be assigned", StringComparison.OrdinalIgnoreCase) || kv.Key.Contains("Will be assigne", StringComparison.OrdinalIgnoreCase)).Value;
+        int willAssignCol = headers.FirstOrDefault(kv => kv.Key.Contains("Will be assigned", StringComparison.OrdinalIgnoreCase)
+            || kv.Key.Contains("Will be assigne", StringComparison.OrdinalIgnoreCase)).Value;
         int priorityCol = headers.ContainsKey("Priority") ? headers["Priority"] : 11;
-        int depCol = headers.FirstOrDefault(kv => kv.Key.Contains("Epic dependency", StringComparison.OrdinalIgnoreCase) || kv.Key.Contains("Dependency", StringComparison.OrdinalIgnoreCase)).Value;
+        int depCol = headers.FirstOrDefault(kv => kv.Key.Contains("Epic dependency", StringComparison.OrdinalIgnoreCase)
+            || kv.Key.Contains("Dependency", StringComparison.OrdinalIgnoreCase)).Value;
         int endAnalysisCol = headers.FirstOrDefault(kv => kv.Key.Contains("End of analysis", StringComparison.OrdinalIgnoreCase)).Value;
 
         int rows = _EpicWorksheet.Dimension.End.Row;
@@ -178,20 +177,20 @@ internal class Planner
             string epicName = _EpicWorksheet.Cells[row, epicCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(epicName)) continue;
 
-            string state = _EpicWorksheet.Cells[row, stateCol].GetValue<string>() ?? "";
+            string state = _EpicWorksheet.Cells[row, stateCol].GetValue<string>() ?? string.Empty;
             double charge = 0.0;
-            double remVal = (remainingCol > 0) ? _EpicWorksheet.Cells[row, remainingCol].GetValue<double>() : 0.0;
-            double roughVal = (roughCol > 0) ? _EpicWorksheet.Cells[row, roughCol].GetValue<double>() : 0.0;
+            double remVal = remainingCol > 0 ? _EpicWorksheet.Cells[row, remainingCol].GetValue<double>() : 0.0;
+            double roughVal = roughCol > 0 ? _EpicWorksheet.Cells[row, roughCol].GetValue<double>() : 0.0;
 
             if (remVal > 0)
                 charge = remVal;
             else if (roughVal > 0)
                 charge = roughVal;
 
-            string assigned = assignedCol > 0 ? (_EpicWorksheet.Cells[row, assignedCol].GetValue<string>() ?? "") : "";
-            string willAssign = willAssignCol > 0 ? (_EpicWorksheet.Cells[row, willAssignCol].GetValue<string>() ?? "") : "";
-            string depRaw = depCol > 0 ? (_EpicWorksheet.Cells[row, depCol].GetValue<string>() ?? "") : "";
-            string endAnalysisStr = endAnalysisCol > 0 ? (_EpicWorksheet.Cells[row, endAnalysisCol].GetValue<string>() ?? "") : "";
+            string assigned = assignedCol > 0 ? (_EpicWorksheet.Cells[row, assignedCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string willAssign = willAssignCol > 0 ? (_EpicWorksheet.Cells[row, willAssignCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string depRaw = depCol > 0 ? (_EpicWorksheet.Cells[row, depCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string endAnalysisStr = endAnalysisCol > 0 ? (_EpicWorksheet.Cells[row, endAnalysisCol].GetValue<string>() ?? string.Empty) : string.Empty;
             string priorityStr = priorityCol > 0 ? (_EpicWorksheet.Cells[row, priorityCol].Text?.Trim() ?? "Normal") : "Normal";
             EpicPriority priority = priorityStr.ToLower() switch
             {
@@ -203,39 +202,40 @@ internal class Planner
             if (DateTime.TryParse(endAnalysisStr, out var parsed))
                 endAnalysis = parsed;
 
-            var epic = new Epic(epicName, state, charge, endAnalysis);
-            epic.Priority = priority;
+            var epic = new Epic(epicName, state, charge, endAnalysis)
+            {
+                Priority = priority
+            };
             epic.ParseAssignments(assigned, willAssign, _ResourceNames);
             epic.ParseDependencies(depRaw);
 
             if (epic.Charge <= 0)
             {
                 epic.Remaining = 0;
-                epic.StartDate = endAnalysis ?? this.m_InitialSprintStart;
-                epic.EndDate = endAnalysis ?? this.m_InitialSprintStart;
+                epic.StartDate = endAnalysis ?? m_InitialSprintStart;
+                epic.EndDate = endAnalysis ?? m_InitialSprintStart;
             }
 
             epics.Add(epic);
         }
 
-        // Normalize dependency names to actual epic names (case-insensitive contains/equals)
         var epicNames = epics.Select(e => e.Name).ToList();
-        foreach (var e in epics)
+        foreach (var epic in epics)
         {
-            for (int i = 0; i < e.Dependencies.Count; i++)
+            for (int i = 0; i < epic.Dependencies.Count; i++)
             {
-                var d = e.Dependencies[i];
+                var dependency = epic.Dependencies[i];
                 var match = epicNames.FirstOrDefault(x =>
-                    x.Equals(d, StringComparison.OrdinalIgnoreCase) ||
-                    x.IndexOf(d, StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    d.IndexOf(x, StringComparison.OrdinalIgnoreCase) >= 0);
+                    x.Equals(dependency, StringComparison.OrdinalIgnoreCase) ||
+                    x.IndexOf(dependency, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    dependency.IndexOf(x, StringComparison.OrdinalIgnoreCase) >= 0);
                 if (!string.IsNullOrWhiteSpace(match))
-                    e.Dependencies[i] = match;
+                    epic.Dependencies[i] = match;
             }
         }
 
         return epics;
-    }
+    } 
 
     #endregion
 }

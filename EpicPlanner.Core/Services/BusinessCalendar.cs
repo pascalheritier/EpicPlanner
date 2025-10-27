@@ -1,9 +1,7 @@
-﻿namespace EpicPlanner;
+namespace EpicPlanner.Core;
 
 public static class BusinessCalendar
 {
-    #region Date helpers
-
     public static bool IsWeekend(DateTime _InputDate) =>
         _InputDate.DayOfWeek == DayOfWeek.Saturday || _InputDate.DayOfWeek == DayOfWeek.Sunday;
 
@@ -17,9 +15,9 @@ public static class BusinessCalendar
     {
         if (_EndDate < _StartDate) return 0;
         int count = 0;
-        for (var d = _StartDate.Date; d <= _EndDate.Date; d = d.AddDays(1))
+        for (var date = _StartDate.Date; date <= _EndDate.Date; date = date.AddDays(1))
         {
-            if (!IsWeekend(d) && !IsHoliday(d, _Holidays)) count++;
+            if (!IsWeekend(date) && !IsHoliday(date, _Holidays)) count++;
         }
         return count;
     }
@@ -36,6 +34,4 @@ public static class BusinessCalendar
         if (end < start) return 0;
         return CountWorkingDays(start, end, _Holidays);
     }
-
-    #endregion
 }

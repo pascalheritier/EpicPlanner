@@ -1,0 +1,54 @@
+namespace EpicPlanner.Core;
+
+public class PlanningSnapshot
+{
+    #region Members
+
+    private readonly List<Epic> m_Epics;
+    private readonly Dictionary<int, Dictionary<string, ResourceCapacity>> m_SprintCapacities;
+    private readonly DateTime m_InitialSprintStart;
+    private readonly int m_iSprintDays;
+    private readonly int m_iMaxSprintCount;
+    private readonly int m_iSprintOffset;
+    private readonly Dictionary<string, double> m_PlannedHours;
+
+    #endregion
+
+    #region Constructor
+
+    public PlanningSnapshot(
+        List<Epic> _Epics,
+        Dictionary<int, Dictionary<string, ResourceCapacity>> _SprintCapacities,
+        DateTime _InitialSprintStart,
+        int _iSprintDays,
+        int _iMaxSprintCount,
+        int _iSprintOffset,
+        Dictionary<string, double> _PlannedHours)
+    {
+        m_Epics = _Epics;
+        m_SprintCapacities = _SprintCapacities;
+        m_InitialSprintStart = _InitialSprintStart;
+        m_iSprintDays = _iSprintDays;
+        m_iMaxSprintCount = _iMaxSprintCount;
+        m_iSprintOffset = _iSprintOffset;
+        m_PlannedHours = _PlannedHours;
+    }
+
+    #endregion
+
+    #region Create Simulator
+
+    public Simulator CreateSimulator()
+    {
+        return new Simulator(
+            m_Epics,
+            m_SprintCapacities,
+            m_InitialSprintStart,
+            m_iSprintDays,
+            m_iMaxSprintCount,
+            m_iSprintOffset,
+            m_PlannedHours);
+    } 
+
+    #endregion
+}
