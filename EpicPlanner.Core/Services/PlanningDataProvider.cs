@@ -50,10 +50,16 @@ public class PlanningDataProvider
             m_AppConfiguration.PlannerConfiguration.Holidays);
 
         Dictionary<string, double> plannedHours = new(StringComparer.OrdinalIgnoreCase);
+        List<SprintEpicSummary> epicSummaries = new();
         if (_bIncludePlannedHours)
         {
             // Get currently planned hours from Redmine
             plannedHours = await redmineDataFetcher.GetPlannedHoursForSprintAsync(
+                m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
+                m_InitialSprintStart,
+                m_InitialSprintStart.AddDays(m_iSprintDays - 1));
+
+            epicSummaries = await redmineDataFetcher.GetEpicSprintSummariesAsync(
                 m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
                 m_InitialSprintStart,
                 m_InitialSprintStart.AddDays(m_iSprintDays - 1));
@@ -66,7 +72,8 @@ public class PlanningDataProvider
             m_iSprintDays,
             m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
             m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
-            plannedHours);
+            plannedHours,
+            epicSummaries);
     }
 
     private Dictionary<string, ResourceCapacity> LoadResources(ExcelWorksheet _ResourceWorksheet)

@@ -20,26 +20,18 @@ internal class Program
         {
             ExcelPackage.License.SetNonCommercialPersonal("Adonite");
 
+            CheckerMode mode = ResolveMode(args);
+
             IServiceCollection services = new ServiceCollection();
             ConfigureServices(services);
             IServiceProvider serviceProvider = services.BuildServiceProvider();
 
             var runner = serviceProvider.GetRequiredService<CheckingRunner>();
-            await runner.RunAsync();
+            string reportPath = await runner.RunAsync(mode);
 
-            AppConfiguration config = serviceProvider.GetRequiredService<AppConfiguration>();
-            string basePath = config.FileConfiguration.OutputFilePath;
-            string directory = Path.GetDirectoryName(basePath) ?? string.Empty;
-            string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(basePath);
-            string extension = Path.GetExtension(basePath);
-            if (string.IsNullOrWhiteSpace(extension))
-            {
-                extension = ".xlsx";
-            }
-            string comparisonPath = Path.Combine(directory, $"{fileNameWithoutExtension}_Comparison{extension}");
-
+            string modeLabel = mode == CheckerMode.Comparison ? "Comparison" : "Epic states";
             LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, "✅ Check completed");
-            LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"Comparison report: {Path.GetFullPath(comparisonPath)}");
+            LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"{modeLabel} report: {Path.GetFullPath(reportPath)}");
         }
         catch (Exception ex)
         {
@@ -86,5 +78,86 @@ internal class Program
         AppConfiguration appConfiguration = new();
         _Configuration.Bind(appConfiguration);
         return appConfiguration;
+    }
+
+    private static CheckerMode ResolveMode(string[] _Args)
+    {
+        if (_Args.Length > 1 && _Args[0].Equals("--mode", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryParseMode(_Args[1], out var modeFromFlag))
+            {
+                return modeFromFlag;
+            }
+        }
+
+        foreach (string arg in _Args)
+        {
+            if (arg.StartsWith("--mode=", StringComparison.OrdinalIgnoreCase))
+            {
+                string candidate = arg[("--mode=").Length..];
+                if (TryParseMode(candidate, out var mode))
+                {
+                    return mode;
+                }
+            }
+            else if (TryParseMode(arg, out var directMode))
+            {
+                return directMode;
+            }
+        }
+
+        Console.WriteLine("Select the checker mode:");
+        Console.WriteLine("  1 - Comparison (sprint planning)");
+        Console.WriteLine("  2 - Epic states (sprint review)");
+
+        while (true)
+        {
+            Console.Write("Enter your choice: ");
+            string? input = Console.ReadLine();
+            if (input is null)
+            {
+                Console.WriteLine("No input detected. Defaulting to Comparison mode.");
+                return CheckerMode.Comparison;
+            }
+
+            if (TryParseMode(input, out var parsedMode))
+            {
+                return parsedMode;
+            }
+
+            Console.WriteLine("Invalid selection. Please type '1' for Comparison or '2' for Epic states.");
+        }
+    }
+
+    private static bool TryParseMode(string? _strInput, out CheckerMode _enumMode)
+    {
+        _enumMode = CheckerMode.Comparison;
+        if (string.IsNullOrWhiteSpace(_strInput))
+        {
+            return false;
+        }
+
+        string value = _strInput.Trim();
+
+        if (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("comparison", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("planning", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("plan", StringComparison.OrdinalIgnoreCase))
+        {
+            _enumMode = CheckerMode.Comparison;
+            return true;
+        }
+
+        if (value.Equals("2", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("epic", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("epicstates", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("epic-state", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("review", StringComparison.OrdinalIgnoreCase))
+        {
+            _enumMode = CheckerMode.EpicStates;
+            return true;
+        }
+
+        return false;
     }
 }
