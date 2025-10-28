@@ -1,4 +1,7 @@
 using OfficeOpenXml;
+using System;
+using System.Globalization;
+using System.IO;
 using System.Linq;
 
 namespace EpicPlanner.Core;
@@ -36,6 +39,12 @@ public class PlanningDataProvider
         ExcelWorksheet wsRes = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputResourcesSheetName]
             ?? throw new NullReferenceException($"Worksheet '{m_AppConfiguration.FileConfiguration.InputResourcesSheetName}' could not be found.");
 
+        Dictionary<string, double> plannedCapacityByEpic = LoadPlannedCapacityLookup(
+            package,
+            m_AppConfiguration.FileConfiguration.InputFilePath,
+            m_AppConfiguration.FileConfiguration.PlannedCapacityFilePath,
+            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber);
+
         Dictionary<string, ResourceCapacity> resources = LoadResources(wsRes);
         List<Epic> epics = LoadEpics(wsEpics, resources.Keys.ToList());
 
@@ -69,7 +78,8 @@ public class PlanningDataProvider
                 m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
                 m_InitialSprintStart,
                 m_InitialSprintStart.AddDays(m_iSprintDays - 1),
-                plannedEpicNames);
+                plannedEpicNames,
+                plannedCapacityByEpic.Count > 0 ? plannedCapacityByEpic : null);
         }
 
         return new PlanningSnapshot(
@@ -80,7 +90,149 @@ public class PlanningDataProvider
             m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
             m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
             plannedHours,
-            epicSummaries);
+            epicSummaries,
+            plannedCapacityByEpic);
+    }
+
+    private static Dictionary<string, double> LoadPlannedCapacityLookup(
+        ExcelPackage _PrimaryPackage,
+        string _PrimaryFilePath,
+        string? _OverrideFilePath,
+        int _InitialSprintNumber)
+    {
+        ExcelWorksheet? fallbackWorksheet = _PrimaryPackage.Workbook.Worksheets["AllocationsByEpicPerSprint"];
+
+        if (string.IsNullOrWhiteSpace(_OverrideFilePath))
+        {
+            return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+        }
+
+        try
+        {
+            string resolvedOverridePath = Path.GetFullPath(_OverrideFilePath);
+            string resolvedPrimaryPath = Path.GetFullPath(_PrimaryFilePath);
+
+            if (string.Equals(resolvedOverridePath, resolvedPrimaryPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+            }
+
+            if (!File.Exists(resolvedOverridePath))
+            {
+                Console.WriteLine($"Warning: Planned capacity file '{resolvedOverridePath}' was not found. Falling back to the primary workbook.");
+                return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+            }
+
+            using ExcelPackage overridePackage = new(new FileInfo(resolvedOverridePath));
+            ExcelWorksheet? overrideWorksheet = overridePackage.Workbook.Worksheets["AllocationsByEpicPerSprint"];
+
+            if (overrideWorksheet == null || overrideWorksheet.Dimension == null)
+            {
+                Console.WriteLine($"Warning: Worksheet 'AllocationsByEpicPerSprint' was not found in '{resolvedOverridePath}'.");
+                return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+            }
+
+            return ReadPlannedCapacityByEpic(overrideWorksheet, _InitialSprintNumber);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warning: Failed to load planned capacity file '{_OverrideFilePath}': {ex.Message}");
+            return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+        }
+    }
+
+    private static Dictionary<string, double> ReadPlannedCapacityByEpic(ExcelWorksheet? _Worksheet, int _InitialSprintNumber)
+    {
+        var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        if (_Worksheet?.Dimension == null)
+            return result;
+
+        var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int col = 1; col <= _Worksheet.Dimension.End.Column; col++)
+        {
+            string? header = _Worksheet.Cells[1, col].GetValue<string>()?.Trim();
+            if (!string.IsNullOrWhiteSpace(header))
+                headers[header] = col;
+        }
+
+        if (!headers.TryGetValue("Epic", out int epicCol) ||
+            !headers.TryGetValue("Sprint", out int sprintCol))
+        {
+            return result;
+        }
+
+        if (!headers.TryGetValue("Total_Hours", out int totalHoursCol))
+        {
+            // Accept also Total Hours without underscore for robustness.
+            headers.TryGetValue("Total Hours", out totalHoursCol);
+        }
+
+        if (totalHoursCol <= 0)
+            return result;
+
+        for (int row = 2; row <= _Worksheet.Dimension.End.Row; row++)
+        {
+            string? epicName = _Worksheet.Cells[row, epicCol].GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(epicName))
+                continue;
+
+            if (!TryReadSprintNumber(_Worksheet.Cells[row, sprintCol].Value, out int sprintNumber) ||
+                sprintNumber != _InitialSprintNumber)
+            {
+                continue;
+            }
+
+            double totalHours = ReadNumericValue(_Worksheet.Cells[row, totalHoursCol].Value);
+            if (totalHours < 0)
+                totalHours = 0;
+
+            if (result.TryGetValue(epicName, out double existing))
+                result[epicName] = existing + totalHours;
+            else
+                result[epicName] = totalHours;
+        }
+
+        return result;
+
+        static bool TryReadSprintNumber(object? value, out int sprintNumber)
+        {
+            switch (value)
+            {
+                case int i:
+                    sprintNumber = i;
+                    return true;
+                case long l:
+                    sprintNumber = (int)l;
+                    return true;
+                case double d:
+                    sprintNumber = (int)Math.Round(d);
+                    return true;
+                case decimal m:
+                    sprintNumber = (int)Math.Round((double)m);
+                    return true;
+                case string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed):
+                    sprintNumber = parsed;
+                    return true;
+                default:
+                    sprintNumber = 0;
+                    return false;
+            }
+        }
+
+        static double ReadNumericValue(object? value)
+        {
+            return value switch
+            {
+                null => 0.0,
+                double d => d,
+                int i => i,
+                long l => l,
+                decimal m => (double)m,
+                float f => f,
+                string s when double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out double parsed) => parsed,
+                _ => 0.0
+            };
+        }
     }
 
     private Dictionary<string, ResourceCapacity> LoadResources(ExcelWorksheet _ResourceWorksheet)

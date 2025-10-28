@@ -10,6 +10,7 @@ public class AppConfiguration
 public class FileConfiguration
 {
     public string InputFilePath { get; set; } = string.Empty;
+    public string? PlannedCapacityFilePath { get; set; } = null;
     public string InputResourcesSheetName { get; set; } = string.Empty;
     public string InputEpicsSheetName { get; set; } = string.Empty;
     public string OutputFilePath { get; set; } = string.Empty;

@@ -127,7 +127,8 @@ public class RedmineDataFetcher
         int _iSprintNumber,
         DateTime _SprintStart,
         DateTime _SprintEnd,
-        IReadOnlyCollection<string> _PlannedEpics)
+        IReadOnlyCollection<string> _PlannedEpics,
+        IReadOnlyDictionary<string, double>? _PlannedCapacityByEpic = null)
     {
         var summaries = new Dictionary<string, SprintEpicSummary>(StringComparer.OrdinalIgnoreCase);
         var descriptors = new Dictionary<string, EpicDescriptor>(StringComparer.OrdinalIgnoreCase);
@@ -135,6 +136,7 @@ public class RedmineDataFetcher
         HashSet<string>? plannedEpicSet = (_PlannedEpics?.Count ?? 0) > 0
             ? new HashSet<string>(_PlannedEpics, StringComparer.OrdinalIgnoreCase)
             : null;
+        bool hasSheetPlannedCapacity = _PlannedCapacityByEpic != null && _PlannedCapacityByEpic.Count > 0;
 
         List<Issue> sprintIssues = (await GetSprintIssuesAsync(_iSprintNumber)).ToList();
 
@@ -222,6 +224,17 @@ public class RedmineDataFetcher
         }
 
         Dictionary<string, double> totalRemaining = await GetTotalRemainingForEpicsAsync(descriptors.Values).ConfigureAwait(false);
+
+        if (hasSheetPlannedCapacity)
+        {
+            foreach (var summary in summaries.Values)
+            {
+                if (_PlannedCapacityByEpic!.TryGetValue(summary.Epic, out double plannedCapacity))
+                {
+                    summary.PlannedCapacity = plannedCapacity;
+                }
+            }
+        }
 
         foreach (var summary in summaries.Values)
         {

@@ -18,6 +18,7 @@ public class Simulator
     private readonly int m_iSprintOffset;
     private readonly Dictionary<string, double> m_PlannedHours;
     private readonly IReadOnlyList<SprintEpicSummary> m_EpicSummaries;
+    private readonly Dictionary<string, double> m_PlannedCapacityByEpic;
 
     private readonly Dictionary<string, DateTime> m_CompletedMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Allocation> m_Allocations = [];
@@ -35,7 +36,8 @@ public class Simulator
         int _iMaxSprintCount,
         int _iSprintOffset,
         Dictionary<string, double>? _PlannedHours = null,
-        IReadOnlyList<SprintEpicSummary>? _EpicSummaries = null)
+        IReadOnlyList<SprintEpicSummary>? _EpicSummaries = null,
+        IReadOnlyDictionary<string, double>? _PlannedCapacityByEpic = null)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
@@ -47,6 +49,9 @@ public class Simulator
             ? new Dictionary<string, double>(_PlannedHours, StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         m_EpicSummaries = _EpicSummaries ?? Array.Empty<SprintEpicSummary>();
+        m_PlannedCapacityByEpic = _PlannedCapacityByEpic is not null
+            ? new Dictionary<string, double>(_PlannedCapacityByEpic, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
         // Mark 0h epics as completed in completedMap
         foreach (var e in _Epics.Where(e => e.Remaining <= 0))
@@ -602,6 +607,8 @@ public class Simulator
             .ToDictionary(g => g.Key, g => g.First().Charge, StringComparer.OrdinalIgnoreCase);
 
         int epicRow = 2;
+        bool hasPlannedCapacityLookup = m_PlannedCapacityByEpic.Count > 0;
+        HashSet<string> missingPlanningEntries = new(StringComparer.OrdinalIgnoreCase);
         foreach (var summary in m_EpicSummaries
                      .OrderBy(s => s.Epic, StringComparer.OrdinalIgnoreCase))
         {
@@ -614,6 +621,14 @@ public class Simulator
             double plannedCapacity = Math.Round(plannedCapacityRaw, 2);
             double consumed = Math.Round(consumedRaw, 2);
             double actualRemaining = Math.Round(actualRemainingRaw, 2);
+
+            if (hasPlannedCapacityLookup && !m_PlannedCapacityByEpic.ContainsKey(summary.Epic))
+            {
+                if (missingPlanningEntries.Add(summary.Epic))
+                {
+                    Console.WriteLine($"Warning: Planned capacity for epic '{summary.Epic}' was not found in the planning sheet. Using Redmine estimates instead.");
+                }
+            }
 
             if (hasInitial)
                 epicSheet.Cells[epicRow, 2].Value = Math.Round(initialRemaining, 2);
