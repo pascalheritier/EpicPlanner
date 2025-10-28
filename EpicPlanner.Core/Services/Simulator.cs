@@ -580,12 +580,14 @@ public class Simulator
         WriteTable(epicSheet, new[]
         {
             "Epic",
+            "Initial_remaining_h",
             "Planned_capacity_h",
             "Consumed_h",
-            "Remaining_h",
-            "Expected_remaining_h",
-            "Overhead_h",
-            "Overhead_pct"
+            "Actual_remaining_h",
+            "Projected_remaining_h",
+            "Delta_remaining_h",
+            "Planning_reliability_rate",
+            "Capacity_usage_rate"
         });
 
         if (m_EpicSummaries.Count == 0)
@@ -595,40 +597,86 @@ public class Simulator
             return;
         }
 
+        var initialRemainingByEpic = m_Epics
+            .GroupBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Charge, StringComparer.OrdinalIgnoreCase);
+
         int epicRow = 2;
         foreach (var summary in m_EpicSummaries
                      .OrderBy(s => s.Epic, StringComparer.OrdinalIgnoreCase))
         {
             epicSheet.Cells[epicRow, 1].Value = summary.Epic;
-            epicSheet.Cells[epicRow, 2].Value = Math.Round(summary.PlannedCapacity, 2);
-            epicSheet.Cells[epicRow, 3].Value = Math.Round(summary.Consumed, 2);
-            epicSheet.Cells[epicRow, 4].Value = Math.Round(summary.Remaining, 2);
-            epicSheet.Cells[epicRow, 5].Value = Math.Round(summary.ExpectedRemaining, 2);
-            epicSheet.Cells[epicRow, 6].Value = Math.Round(summary.OverheadHours, 2);
-            epicSheet.Cells[epicRow, 7].Value = summary.OverheadRatio;
-            epicSheet.Cells[epicRow, 7].Style.Numberformat.Format = "0.00%";
+
+            bool hasInitial = initialRemainingByEpic.TryGetValue(summary.Epic, out double initialRemaining);
+            double plannedCapacityRaw = summary.PlannedCapacity;
+            double consumedRaw = summary.Consumed;
+            double actualRemainingRaw = summary.Remaining;
+            double projectedRemainingRaw = hasInitial
+                ? Math.Max(0.0, initialRemaining - plannedCapacityRaw)
+                : actualRemainingRaw;
+            double deltaRemainingRaw = hasInitial
+                ? initialRemaining - actualRemainingRaw
+                : 0.0;
+
+            double plannedCapacity = Math.Round(plannedCapacityRaw, 2);
+            double consumed = Math.Round(consumedRaw, 2);
+            double actualRemaining = Math.Round(actualRemainingRaw, 2);
+            double projectedRemaining = Math.Round(projectedRemainingRaw, 2);
+            double deltaRemaining = Math.Round(deltaRemainingRaw, 2);
+
+            double? planningReliability = null;
+            if (hasInitial && plannedCapacityRaw > 1e-6)
+            {
+                double rawReliability = 1.0 - Math.Abs(projectedRemainingRaw - actualRemainingRaw) / plannedCapacityRaw;
+                planningReliability = Math.Clamp(rawReliability, 0.0, 1.0);
+            }
+
+            double? capacityUsage = plannedCapacityRaw > 1e-6
+                ? consumedRaw / plannedCapacityRaw
+                : null;
+
+            if (hasInitial)
+                epicSheet.Cells[epicRow, 2].Value = Math.Round(initialRemaining, 2);
+            epicSheet.Cells[epicRow, 3].Value = plannedCapacity;
+            epicSheet.Cells[epicRow, 4].Value = consumed;
+            epicSheet.Cells[epicRow, 5].Value = actualRemaining;
+            epicSheet.Cells[epicRow, 6].Value = projectedRemaining;
+            if (hasInitial)
+                epicSheet.Cells[epicRow, 7].Value = deltaRemaining;
+
+            if (planningReliability.HasValue)
+            {
+                epicSheet.Cells[epicRow, 8].Value = planningReliability.Value;
+                epicSheet.Cells[epicRow, 8].Style.Numberformat.Format = "0.00%";
+            }
+
+            if (capacityUsage.HasValue)
+            {
+                epicSheet.Cells[epicRow, 9].Value = capacityUsage.Value;
+                epicSheet.Cells[epicRow, 9].Style.Numberformat.Format = "0.00%";
+            }
+
             epicRow++;
         }
 
         int lastEpicRow = epicRow - 1;
-        var diffRange = epicSheet.Cells[2, 6, lastEpicRow, 6];
-        var pctRange = epicSheet.Cells[2, 7, lastEpicRow, 7];
+        if (lastEpicRow >= 2)
+        {
+            var reliabilityRange = epicSheet.Cells[2, 8, lastEpicRow, 8];
+            var usageRange = epicSheet.Cells[2, 9, lastEpicRow, 9];
 
-        var condOver = diffRange.ConditionalFormatting.AddExpression();
-        condOver.Formula = "F2>0";
-        condOver.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
-        condOver.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightCoral);
-        condOver.Style.Font.Color.SetColor(System.Drawing.Color.DarkRed);
+            var condReliability = reliabilityRange.ConditionalFormatting.AddExpression();
+            condReliability.Formula = "AND($H2<>\"\",$H2<0.8)";
+            condReliability.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+            condReliability.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightYellow);
+            condReliability.Style.Font.Color.SetColor(System.Drawing.Color.DarkOrange);
 
-        var condUnder = diffRange.ConditionalFormatting.AddExpression();
-        condUnder.Formula = "F2<0";
-        condUnder.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
-        condUnder.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightGreen);
-        condUnder.Style.Font.Color.SetColor(System.Drawing.Color.DarkGreen);
-
-        var condPct = pctRange.ConditionalFormatting.AddExpression();
-        condPct.Formula = "ABS(G2)>0.05";
-        condPct.Style.Font.Bold = true;
+            var condUsage = usageRange.ConditionalFormatting.AddExpression();
+            condUsage.Formula = "AND($I2<>\"\",OR($I2<0.8,$I2>1.2))";
+            condUsage.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+            condUsage.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightCoral);
+            condUsage.Style.Font.Color.SetColor(System.Drawing.Color.DarkRed);
+        }
 
         epicSheet.Cells.AutoFitColumns();
     }
