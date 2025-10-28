@@ -73,14 +73,38 @@ public class RedmineDataFetcher
         return result;
     }
 
-    public async Task<Dictionary<string, double>> GetPlannedHoursForSprintAsync(int _iSprintNumber, DateTime _SprintStart, DateTime _SprintEnd)
+    public async Task<Dictionary<string, double>> GetPlannedHoursForSprintAsync(
+        int _iSprintNumber,
+        DateTime _SprintStart,
+        DateTime _SprintEnd,
+        IReadOnlyCollection<string> _PlannedEpics)
     {
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string>? plannedEpicSet = (_PlannedEpics?.Count ?? 0) > 0
+            ? new HashSet<string>(_PlannedEpics, StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        Dictionary<int, Issue>? parentCache = plannedEpicSet != null
+            ? new Dictionary<int, Issue>()
+            : null;
+
         IEnumerable<Issue> issues = await GetSprintIssuesAsync(_iSprintNumber);
         foreach (var issue in issues)
         {
             if (issue.AssignedTo == null || issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
                 continue;
+
+            if (plannedEpicSet != null)
+            {
+                EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(issue, parentCache!).ConfigureAwait(false);
+                if (!plannedEpicSet.Contains(descriptor.Name))
+                    continue;
+
+                if (issue.Id > 0)
+                {
+                    parentCache[issue.Id] = issue;
+                }
+            }
 
             IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(_Field => _Field.Name == "Reste à faire");
             if (estimation?.Values == null)
@@ -99,11 +123,18 @@ public class RedmineDataFetcher
         return result;
     }
 
-    public async Task<List<SprintEpicSummary>> GetEpicSprintSummariesAsync(int _iSprintNumber, DateTime _SprintStart, DateTime _SprintEnd)
+    public async Task<List<SprintEpicSummary>> GetEpicSprintSummariesAsync(
+        int _iSprintNumber,
+        DateTime _SprintStart,
+        DateTime _SprintEnd,
+        IReadOnlyCollection<string> _PlannedEpics)
     {
         var summaries = new Dictionary<string, SprintEpicSummary>(StringComparer.OrdinalIgnoreCase);
         var descriptors = new Dictionary<string, EpicDescriptor>(StringComparer.OrdinalIgnoreCase);
         var sprintRemaining = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string>? plannedEpicSet = (_PlannedEpics?.Count ?? 0) > 0
+            ? new HashSet<string>(_PlannedEpics, StringComparer.OrdinalIgnoreCase)
+            : null;
 
         List<Issue> sprintIssues = (await GetSprintIssuesAsync(_iSprintNumber)).ToList();
 
@@ -116,6 +147,9 @@ public class RedmineDataFetcher
                 continue;
 
             EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(issue, parentCache).ConfigureAwait(false);
+
+            if (plannedEpicSet != null && !plannedEpicSet.Contains(descriptor.Name))
+                continue;
 
             if (issue.Id > 0)
                 issueCache[issue.Id] = issue;
@@ -147,7 +181,9 @@ public class RedmineDataFetcher
         }
 
         List<TimeEntryRecord> timeEntries = await GetTimeEntriesAsync(_SprintStart, _SprintEnd).ConfigureAwait(false);
-        HashSet<string> plannedEpicNames = new(descriptors.Keys, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> plannedEpicNames = plannedEpicSet != null
+            ? new HashSet<string>(plannedEpicSet, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(descriptors.Keys, StringComparer.OrdinalIgnoreCase);
 
         foreach (TimeEntryRecord entry in timeEntries)
         {
