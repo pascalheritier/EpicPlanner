@@ -1,4 +1,5 @@
 using OfficeOpenXml;
+using System.Linq;
 
 namespace EpicPlanner.Core;
 
@@ -51,18 +52,24 @@ public class PlanningDataProvider
 
         Dictionary<string, double> plannedHours = new(StringComparer.OrdinalIgnoreCase);
         List<SprintEpicSummary> epicSummaries = new();
+        HashSet<string> plannedEpicNames = epics
+            .Where(e => e.Wishes.Count > 0 && e.Remaining > 0)
+            .Select(e => e.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (_bIncludePlannedHours)
         {
             // Get currently planned hours from Redmine
             plannedHours = await redmineDataFetcher.GetPlannedHoursForSprintAsync(
                 m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
                 m_InitialSprintStart,
-                m_InitialSprintStart.AddDays(m_iSprintDays - 1));
+                m_InitialSprintStart.AddDays(m_iSprintDays - 1),
+                plannedEpicNames);
 
             epicSummaries = await redmineDataFetcher.GetEpicSprintSummariesAsync(
                 m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
                 m_InitialSprintStart,
-                m_InitialSprintStart.AddDays(m_iSprintDays - 1));
+                m_InitialSprintStart.AddDays(m_iSprintDays - 1),
+                plannedEpicNames);
         }
 
         return new PlanningSnapshot(
