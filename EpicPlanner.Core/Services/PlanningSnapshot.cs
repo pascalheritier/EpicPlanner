@@ -12,6 +12,7 @@ public class PlanningSnapshot
     private readonly int m_iSprintOffset;
     private readonly Dictionary<string, double> m_PlannedHours;
     private readonly IReadOnlyList<SprintEpicSummary> m_EpicSummaries;
+    private readonly Dictionary<string, double> m_PlannedCapacityByEpic;
 
     #endregion
 
@@ -25,7 +26,8 @@ public class PlanningSnapshot
         int _iMaxSprintCount,
         int _iSprintOffset,
         Dictionary<string, double> _PlannedHours,
-        IReadOnlyList<SprintEpicSummary> _EpicSummaries)
+        IReadOnlyList<SprintEpicSummary> _EpicSummaries,
+        IReadOnlyDictionary<string, double> _PlannedCapacityByEpic)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
@@ -35,6 +37,9 @@ public class PlanningSnapshot
         m_iSprintOffset = _iSprintOffset;
         m_PlannedHours = _PlannedHours;
         m_EpicSummaries = _EpicSummaries;
+        m_PlannedCapacityByEpic = _PlannedCapacityByEpic != null
+            ? new Dictionary<string, double>(_PlannedCapacityByEpic, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
     }
 
     #endregion
@@ -51,7 +56,8 @@ public class PlanningSnapshot
             m_iMaxSprintCount,
             m_iSprintOffset,
             m_PlannedHours,
-            m_EpicSummaries);
+            m_EpicSummaries,
+            m_PlannedCapacityByEpic);
     }
 
     #endregion
