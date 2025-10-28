@@ -611,50 +611,24 @@ public class Simulator
             double plannedCapacityRaw = summary.PlannedCapacity;
             double consumedRaw = summary.Consumed;
             double actualRemainingRaw = summary.Remaining;
-            double projectedRemainingRaw = hasInitial
-                ? Math.Max(0.0, initialRemaining - plannedCapacityRaw)
-                : actualRemainingRaw;
-            double deltaRemainingRaw = hasInitial
-                ? initialRemaining - actualRemainingRaw
-                : 0.0;
-
             double plannedCapacity = Math.Round(plannedCapacityRaw, 2);
             double consumed = Math.Round(consumedRaw, 2);
             double actualRemaining = Math.Round(actualRemainingRaw, 2);
-            double projectedRemaining = Math.Round(projectedRemainingRaw, 2);
-            double deltaRemaining = Math.Round(deltaRemainingRaw, 2);
-
-            double? planningReliability = null;
-            if (hasInitial && plannedCapacityRaw > 1e-6)
-            {
-                double rawReliability = 1.0 - Math.Abs(projectedRemainingRaw - actualRemainingRaw) / plannedCapacityRaw;
-                planningReliability = Math.Clamp(rawReliability, 0.0, 1.0);
-            }
-
-            double? capacityUsage = plannedCapacityRaw > 1e-6
-                ? consumedRaw / plannedCapacityRaw
-                : null;
 
             if (hasInitial)
                 epicSheet.Cells[epicRow, 2].Value = Math.Round(initialRemaining, 2);
             epicSheet.Cells[epicRow, 3].Value = plannedCapacity;
             epicSheet.Cells[epicRow, 4].Value = consumed;
             epicSheet.Cells[epicRow, 5].Value = actualRemaining;
-            epicSheet.Cells[epicRow, 6].Value = projectedRemaining;
-            if (hasInitial)
-                epicSheet.Cells[epicRow, 7].Value = deltaRemaining;
+            epicSheet.Cells[epicRow, 6].Formula = $"=IF(ISBLANK(B{epicRow}),E{epicRow},MAX(0,B{epicRow}-C{epicRow}))";
+            epicSheet.Cells[epicRow, 7].Formula = $"=IF(ISBLANK(B{epicRow}),\"\",B{epicRow}-E{epicRow})";
 
-            if (planningReliability.HasValue)
-            {
-                epicSheet.Cells[epicRow, 8].Value = planningReliability.Value;
-                epicSheet.Cells[epicRow, 8].Style.Numberformat.Format = "0.00%";
-            }
+            string reliabilityFormula =
+                $"=IF(OR(ISBLANK(B{epicRow}),C{epicRow}<=0),\"\",MIN(1,MAX(0,1-ABS(F{epicRow}-E{epicRow})/C{epicRow})))";
+            string usageFormula = $"=IF(C{epicRow}<=0,\"\",D{epicRow}/C{epicRow})";
 
-            if (capacityUsage.HasValue)
-            {
-                epicSheet.Cells[epicRow, 9].Value = capacityUsage.Value;
-                epicSheet.Cells[epicRow, 9].Style.Numberformat.Format = "0.00%";
-            }
+            epicSheet.Cells[epicRow, 8].Formula = reliabilityFormula;
+            epicSheet.Cells[epicRow, 9].Formula = usageFormula;
 
             epicRow++;
         }
@@ -664,6 +638,9 @@ public class Simulator
         {
             var reliabilityRange = epicSheet.Cells[2, 8, lastEpicRow, 8];
             var usageRange = epicSheet.Cells[2, 9, lastEpicRow, 9];
+
+            reliabilityRange.Style.Numberformat.Format = "0.00%";
+            usageRange.Style.Numberformat.Format = "0.00%";
 
             var condReliability = reliabilityRange.ConditionalFormatting.AddExpression();
             condReliability.Formula = "AND($H2<>\"\",$H2<0.8)";
