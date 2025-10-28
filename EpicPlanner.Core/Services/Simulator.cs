@@ -624,8 +624,9 @@ public class Simulator
             epicSheet.Cells[epicRow, 7].Formula = $"=IF(ISBLANK(B{epicRow}),\"\",B{epicRow}-E{epicRow})";
 
             string reliabilityFormula =
-                $"=IF(OR(ISBLANK(B{epicRow}),C{epicRow}<=0),\"\",MIN(1,MAX(0,1-ABS(F{epicRow}-E{epicRow})/C{epicRow})))";
-            string usageFormula = $"=IF(C{epicRow}<=0,\"\",D{epicRow}/C{epicRow})";
+                $"=IF(ISBLANK(B{epicRow}),\"\",IF(C{epicRow}<=0,IF(D{epicRow}>0,0,\"\"),MIN(1,MAX(0,1-ABS(F{epicRow}-E{epicRow})/C{epicRow}))))";
+            string usageFormula =
+                $"=IF(C{epicRow}<=0,IF(D{epicRow}>0,2,\"\"),D{epicRow}/C{epicRow})";
 
             epicSheet.Cells[epicRow, 8].Formula = reliabilityFormula;
             epicSheet.Cells[epicRow, 9].Formula = usageFormula;
