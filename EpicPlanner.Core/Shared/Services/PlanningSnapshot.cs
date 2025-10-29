@@ -1,8 +1,9 @@
+using EpicPlanner.Core.Shared.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace EpicPlanner.Core;
+namespace EpicPlanner.Core.Shared.Services;
 
 public class PlanningSnapshot
 {

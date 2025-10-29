@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace EpicPlanner.Core;
+namespace EpicPlanner.Core.Shared.Models;
 
 public enum EpicPriority
 {

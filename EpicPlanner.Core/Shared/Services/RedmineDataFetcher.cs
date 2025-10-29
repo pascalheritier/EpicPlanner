@@ -9,7 +9,7 @@ using Redmine.Net.Api;
 using Redmine.Net.Api.Net;
 using Redmine.Net.Api.Types;
 
-namespace EpicPlanner.Core;
+namespace EpicPlanner.Core.Shared.Services;
 
 public class RedmineDataFetcher
 {

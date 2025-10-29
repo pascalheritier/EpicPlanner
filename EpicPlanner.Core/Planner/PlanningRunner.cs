@@ -1,8 +1,11 @@
+using EpicPlanner.Core.Configuration;
+using EpicPlanner.Core.Shared.Models;
+using EpicPlanner.Core.Shared.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace EpicPlanner.Core;
+namespace EpicPlanner.Core.Planner;
 
 public class PlanningRunner
 {

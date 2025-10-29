@@ -1,11 +1,13 @@
+using EpicPlanner.Core.Checker;
+using EpicPlanner.Core.Planner;
+using EpicPlanner.Core.Shared.Models;
 using OfficeOpenXml;
 using SkiaSharp;
-using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace EpicPlanner.Core;
+namespace EpicPlanner.Core.Shared.Services;
 
 public class Simulator
 {
@@ -525,16 +527,16 @@ public class Simulator
         }
     }
 
-    public void ExportCheckerReport(string _strOutputExcelPath, EnumCheckerMode _enumMode)
+    public void ExportCheckerReport(string _strOutputExcelPath, CheckerMode _enumMode)
     {
         using ExcelPackage package = new();
 
         switch (_enumMode)
         {
-            case EnumCheckerMode.Comparison:
+            case CheckerMode.Comparison:
                 WriteComparisonWorksheet(package);
                 break;
-            case EnumCheckerMode.EpicStates:
+            case CheckerMode.EpicStates:
                 WriteEpicWorksheet(package);
                 break;
             default:

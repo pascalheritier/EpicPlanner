@@ -1,10 +1,11 @@
+using EpicPlanner.Core.Configuration;
+using EpicPlanner.Core.Shared.Models;
 using OfficeOpenXml;
-using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 
-namespace EpicPlanner.Core;
+namespace EpicPlanner.Core.Shared.Services;
 
 public class PlanningDataProvider
 {

@@ -1,4 +1,5 @@
-using EpicPlanner.Core;
+using EpicPlanner.Core.Configuration;
+using EpicPlanner.Core.Planner;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -53,8 +54,7 @@ internal class Program
             .Build();
 
         _Services.AddSingleton(_ => GetAppConfiguration(config));
-        _Services.AddSingleton<PlanningDataProvider>();
-        _Services.AddTransient<PlanningRunner>();
+        _Services.AddPlannerCore();
 
         _Services.AddLogging(loggingBuilder =>
         {
