@@ -76,8 +76,8 @@ public class RedmineDataFetcher
 
     public async Task<Dictionary<string, double>> GetPlannedHoursForSprintAsync(
         int _iSprintNumber,
-        DateTime _dtSprintStart,
-        DateTime _dtSprintEnd,
+        DateTime _SprintStart,
+        DateTime _SprintEnd,
         IReadOnlyCollection<string> _PlannedEpics)
     {
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
@@ -126,8 +126,8 @@ public class RedmineDataFetcher
 
     public async Task<List<SprintEpicSummary>> GetEpicSprintSummariesAsync(
         int _iSprintNumber,
-        DateTime _dtSprintStart,
-        DateTime _dtSprintEnd,
+        DateTime _SprintStart,
+        DateTime _SprintEnd,
         IReadOnlyCollection<string> _PlannedEpics,
         IReadOnlyDictionary<string, double>? _PlannedCapacityByEpic = null)
     {
@@ -222,7 +222,7 @@ public class RedmineDataFetcher
             }
         }
 
-        List<TimeEntryRecord> timeEntries = await GetTimeEntriesAsync(_dtSprintStart, _dtSprintEnd).ConfigureAwait(false);
+        List<TimeEntryRecord> timeEntries = await GetTimeEntriesAsync(_SprintStart, _SprintEnd).ConfigureAwait(false);
         HashSet<string> plannedEpicNames = plannedEpicSet != null
             ? new HashSet<string>(plannedEpicSet, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(descriptors.Keys, StringComparer.OrdinalIgnoreCase);
@@ -317,7 +317,7 @@ public class RedmineDataFetcher
         return await GetIssuesAsync(parameters);
     }
 
-    private async Task<List<TimeEntryRecord>> GetTimeEntriesAsync(DateTime _dtSprintStart, DateTime _dtSprintEnd)
+    private async Task<List<TimeEntryRecord>> GetTimeEntriesAsync(DateTime _SprintStart, DateTime _SprintEnd)
     {
         var results = new List<TimeEntryRecord>();
         int offset = 0;
@@ -327,7 +327,7 @@ public class RedmineDataFetcher
         {
             while (true)
             {
-                string url = $"time_entries.json?from={_dtSprintStart:yyyy-MM-dd}&to={_dtSprintEnd:yyyy-MM-dd}&offset={offset}&limit={limit}";
+                string url = $"time_entries.json?from={_SprintStart:yyyy-MM-dd}&to={_SprintEnd:yyyy-MM-dd}&offset={offset}&limit={limit}";
                 using HttpResponseMessage response = await m_HttpClient.GetAsync(url).ConfigureAwait(false);
 
                 if (!response.IsSuccessStatusCode)
