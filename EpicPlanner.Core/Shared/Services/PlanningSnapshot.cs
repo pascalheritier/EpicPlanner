@@ -1,3 +1,5 @@
+using EpicPlanner.Core.Checker.Simulation;
+using EpicPlanner.Core.Planner.Simulation;
 using EpicPlanner.Core.Shared.Models;
 using System;
 using System.Collections.Generic;
@@ -55,15 +57,13 @@ public class PlanningSnapshot
 
     #endregion
 
-    #region Create Simulator
+    #region Create Simulators
 
-    public Simulator CreateSimulator(Func<Epic, bool>? _Filter = null)
+    public PlannerSimulator CreatePlannerSimulator(Func<Epic, bool>? _Filter = null)
     {
-        List<Epic> epics = _Filter is null
-            ? m_Epics
-            : m_Epics.Where(_Filter).ToList();
+        List<Epic> epics = FilterEpics(_Filter);
 
-        return new Simulator(
+        return new PlannerSimulator(
             epics,
             m_SprintCapacities,
             m_InitialSprintStart,
@@ -73,6 +73,29 @@ public class PlanningSnapshot
             m_PlannedHours,
             m_EpicSummaries,
             m_PlannedCapacityByEpic);
+    }
+
+    public CheckerSimulator CreateCheckerSimulator(Func<Epic, bool>? _Filter = null)
+    {
+        List<Epic> epics = FilterEpics(_Filter);
+
+        return new CheckerSimulator(
+            epics,
+            m_SprintCapacities,
+            m_InitialSprintStart,
+            m_iSprintDays,
+            m_iMaxSprintCount,
+            m_iSprintOffset,
+            m_PlannedHours,
+            m_EpicSummaries,
+            m_PlannedCapacityByEpic);
+    }
+
+    private List<Epic> FilterEpics(Func<Epic, bool>? _Filter)
+    {
+        return _Filter is null
+            ? m_Epics
+            : m_Epics.Where(_Filter).ToList();
     }
 
     #endregion

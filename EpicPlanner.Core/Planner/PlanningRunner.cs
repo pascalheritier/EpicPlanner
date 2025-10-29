@@ -1,4 +1,5 @@
 using EpicPlanner.Core.Configuration;
+using EpicPlanner.Core.Planner.Simulation;
 using EpicPlanner.Core.Shared.Models;
 using EpicPlanner.Core.Shared.Services;
 using System;
@@ -37,7 +38,7 @@ public class PlanningRunner
         if (_enumMode == PlanningMode.Analysis)
         {
             HashSet<string> analysisScope = BuildAnalysisScope(snapshot.Epics);
-            Simulator simulator = snapshot.CreateSimulator(epic => analysisScope.Contains(epic.Name));
+            PlannerSimulator simulator = snapshot.CreatePlannerSimulator(epic => analysisScope.Contains(epic.Name));
             simulator.Run();
             AlignAnalysisEpicsToEndDates(
                 simulator.Epics,
@@ -51,7 +52,7 @@ public class PlanningRunner
             return;
         }
 
-        Simulator standardSimulator = snapshot.CreateSimulator();
+        PlannerSimulator standardSimulator = snapshot.CreatePlannerSimulator();
         standardSimulator.Run();
         standardSimulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
         standardSimulator.ExportGanttSprintBased(

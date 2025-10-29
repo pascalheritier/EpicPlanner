@@ -1,3 +1,4 @@
+using EpicPlanner.Core.Checker.Simulation;
 using EpicPlanner.Core.Configuration;
 using EpicPlanner.Core.Shared.Services;
 
@@ -27,7 +28,7 @@ public class CheckingRunner
     public async Task<string> RunAsync(CheckerMode _enumMode)
     {
         PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: true);
-        Simulator simulator = snapshot.CreateSimulator();
+        CheckerSimulator simulator = snapshot.CreateCheckerSimulator();
         simulator.Run();
         string outputPath = ResolveOutputPath(_enumMode);
         simulator.ExportCheckerReport(outputPath, _enumMode);
