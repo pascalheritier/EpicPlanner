@@ -27,22 +27,22 @@ public class RedmineDataFetcher
 
     #region Constructor
 
-    public RedmineDataFetcher(string _BaseUrl, string _ApiKey)
+    public RedmineDataFetcher(string _strBaseUrl, string _strApiKey)
     {
-        if (string.IsNullOrWhiteSpace(_BaseUrl))
-            throw new ArgumentException("Redmine base URL must be provided.", nameof(_BaseUrl));
+        if (string.IsNullOrWhiteSpace(_strBaseUrl))
+            throw new ArgumentException("Redmine base URL must be provided.", nameof(_strBaseUrl));
 
         m_RedmineManager = new RedmineManager(new RedmineManagerOptionsBuilder()
-            .WithHost(_BaseUrl)
-            .WithApiKeyAuthentication(_ApiKey));
+            .WithHost(_strBaseUrl)
+            .WithApiKeyAuthentication(_strApiKey));
 
-        string normalizedBaseUrl = _BaseUrl.EndsWith("/") ? _BaseUrl : _BaseUrl + "/";
+        string normalizedBaseUrl = _strBaseUrl.EndsWith("/") ? _strBaseUrl : _strBaseUrl + "/";
 
         m_HttpClient = new HttpClient
         {
             BaseAddress = new Uri(normalizedBaseUrl)
         };
-        m_HttpClient.DefaultRequestHeaders.Add("X-Redmine-API-Key", _ApiKey);
+        m_HttpClient.DefaultRequestHeaders.Add("X-Redmine-API-Key", _strApiKey);
     }
 
     #endregion
@@ -391,12 +391,12 @@ public class RedmineDataFetcher
         return new EpicDescriptor("(No Epic)", null);
     }
 
-    private static string? NormalizeEpicName(string? _RawEpicValue)
+    private static string? NormalizeEpicName(string? _strRawEpicValue)
     {
-        if (string.IsNullOrWhiteSpace(_RawEpicValue))
+        if (string.IsNullOrWhiteSpace(_strRawEpicValue))
             return null;
 
-        return _RawEpicValue.Trim();
+        return _strRawEpicValue.Trim();
     }
 
     private async Task<EpicCustomFieldValue?> ExtractEpicCustomFieldValueAsync(Issue _Issue)
@@ -796,9 +796,9 @@ public class RedmineDataFetcher
 
     private sealed class EpicDescriptor
     {
-        public EpicDescriptor(string _Name, int? _iEnumerationId)
+        public EpicDescriptor(string _strName, int? _iEnumerationId)
         {
-            Name = _Name;
+            Name = _strName;
             EnumerationId = _iEnumerationId;
         }
 
@@ -899,12 +899,12 @@ public class RedmineDataFetcher
         public int Id { get; set; }
     }
 
-    private static int TryParseEnumerationId(string? _Value)
+    private static int TryParseEnumerationId(string? _strValue)
     {
-        if (string.IsNullOrWhiteSpace(_Value))
+        if (string.IsNullOrWhiteSpace(_strValue))
             return 0;
 
-        return int.TryParse(_Value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
+        return int.TryParse(_strValue.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
             ? parsed
             : 0;
     }

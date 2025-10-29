@@ -96,21 +96,21 @@ public class PlanningDataProvider
 
     private static Dictionary<string, double> LoadPlannedCapacityLookup(
         ExcelPackage _PrimaryPackage,
-        string _PrimaryFilePath,
-        string? _OverrideFilePath,
+        string _strPrimaryFilePath,
+        string? _strOverrideFilePath,
         int _iInitialSprintNumber)
     {
         ExcelWorksheet? fallbackWorksheet = _PrimaryPackage.Workbook.Worksheets["AllocationsByEpicPerSprint"];
 
-        if (string.IsNullOrWhiteSpace(_OverrideFilePath))
+        if (string.IsNullOrWhiteSpace(_strOverrideFilePath))
         {
             return ReadPlannedCapacityByEpic(fallbackWorksheet, _iInitialSprintNumber);
         }
 
         try
         {
-            string resolvedOverridePath = Path.GetFullPath(_OverrideFilePath);
-            string resolvedPrimaryPath = Path.GetFullPath(_PrimaryFilePath);
+            string resolvedOverridePath = Path.GetFullPath(_strOverrideFilePath);
+            string resolvedPrimaryPath = Path.GetFullPath(_strPrimaryFilePath);
 
             if (string.Equals(resolvedOverridePath, resolvedPrimaryPath, StringComparison.OrdinalIgnoreCase))
             {
@@ -136,7 +136,7 @@ public class PlanningDataProvider
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Warning: Failed to load planned capacity file '{_OverrideFilePath}': {ex.Message}");
+            Console.WriteLine($"Warning: Failed to load planned capacity file '{_strOverrideFilePath}': {ex.Message}");
             return ReadPlannedCapacityByEpic(fallbackWorksheet, _iInitialSprintNumber);
         }
     }
