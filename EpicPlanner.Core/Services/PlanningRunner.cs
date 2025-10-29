@@ -104,22 +104,28 @@ public class PlanningRunner
     {
         foreach (Epic epic in _Epics)
         {
-            if (!IsAnalysisState(epic))
+            if (IsAnalysisState(epic))
             {
+                if (epic.EndAnalysis.HasValue)
+                {
+                    DateTime end = epic.EndAnalysis.Value.Date;
+                    epic.StartDate = end;
+                    epic.EndDate = end;
+                }
+                else
+                {
+                    epic.StartDate = null;
+                    epic.EndDate = null;
+                }
+
                 continue;
             }
 
-            if (epic.EndAnalysis.HasValue)
-            {
-                DateTime end = epic.EndAnalysis.Value.Date;
-                epic.StartDate = end;
-                epic.EndDate = end;
-            }
-            else
-            {
-                epic.StartDate = null;
-                epic.EndDate = null;
-            }
+            // Non-analysis epics (development dependencies, etc.) are kept in the
+            // simulation for scheduling purposes but must not appear in the analysis
+            // Gantt. Clearing their dates prevents them from being rendered.
+            epic.StartDate = null;
+            epic.EndDate = null;
         }
     }
 
