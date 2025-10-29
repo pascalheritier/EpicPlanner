@@ -1,3 +1,6 @@
+using System;
+using System.Linq;
+
 namespace EpicPlanner.Core;
 
 public class PlanningSnapshot
@@ -46,10 +49,14 @@ public class PlanningSnapshot
 
     #region Create Simulator
 
-    public Simulator CreateSimulator()
+    public Simulator CreateSimulator(Func<Epic, bool>? _Filter = null)
     {
+        List<Epic> epics = _Filter is null
+            ? m_Epics
+            : m_Epics.Where(_Filter).ToList();
+
         return new Simulator(
-            m_Epics,
+            epics,
             m_SprintCapacities,
             m_InitialSprintStart,
             m_iSprintDays,

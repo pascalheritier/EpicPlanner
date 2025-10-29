@@ -20,16 +20,21 @@ internal class Program
         {
             ExcelPackage.License.SetNonCommercialPersonal("Adonite");
 
+            PlanningMode mode = ResolvePlanningMode(args);
+
             IServiceCollection services = new ServiceCollection();
             ConfigureServices(services);
             IServiceProvider serviceProvider = services.BuildServiceProvider();
 
             var runner = serviceProvider.GetRequiredService<PlanningRunner>();
-            await runner.RunAsync();
+            await runner.RunAsync(mode);
 
             AppConfiguration config = serviceProvider.GetRequiredService<AppConfiguration>();
             LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, "✅ Planning completed");
-            LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"Excel: {Path.GetFullPath(config.FileConfiguration.OutputFilePath)}");
+            if (mode == PlanningMode.Standard)
+            {
+                LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"Excel: {Path.GetFullPath(config.FileConfiguration.OutputFilePath)}");
+            }
             LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"Gantt: {Path.GetFullPath(config.FileConfiguration.OutputPngFilePath)}");
         }
         catch (Exception ex)
@@ -77,5 +82,86 @@ internal class Program
         AppConfiguration appConfiguration = new();
         _Configuration.Bind(appConfiguration);
         return appConfiguration;
+    }
+
+    private static PlanningMode ResolvePlanningMode(string[] _Args)
+    {
+        if (_Args.Length > 1 && _Args[0].Equals("--mode", StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryParsePlanningMode(_Args[1], out PlanningMode fromFlag))
+            {
+                return fromFlag;
+            }
+        }
+
+        foreach (string arg in _Args)
+        {
+            if (arg.StartsWith("--mode=", StringComparison.OrdinalIgnoreCase))
+            {
+                string candidate = arg[("--mode=").Length..];
+                if (TryParsePlanningMode(candidate, out PlanningMode modeFromOption))
+                {
+                    return modeFromOption;
+                }
+            }
+            else if (TryParsePlanningMode(arg, out PlanningMode directMode))
+            {
+                return directMode;
+            }
+        }
+
+        Console.WriteLine("Select the planning mode:");
+        Console.WriteLine("  1 - Standard planning (sprint planning)");
+        Console.WriteLine("  2 - Analysis planning (strategic planning)");
+
+        while (true)
+        {
+            Console.Write("Enter your choice: ");
+            string? input = Console.ReadLine();
+            if (input is null)
+            {
+                Console.WriteLine("No input detected. Defaulting to standard planning.");
+                return PlanningMode.Standard;
+            }
+
+            if (TryParsePlanningMode(input, out PlanningMode parsed))
+            {
+                return parsed;
+            }
+
+            Console.WriteLine("Invalid selection. Please type '1' for Standard planning or '2' for Analysis planning.");
+        }
+    }
+
+    private static bool TryParsePlanningMode(string? _Input, out PlanningMode _Mode)
+    {
+        _Mode = PlanningMode.Standard;
+        if (string.IsNullOrWhiteSpace(_Input))
+        {
+            return false;
+        }
+
+        string value = _Input.Trim();
+
+        if (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("standard", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("plan", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("planning", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("sprint", StringComparison.OrdinalIgnoreCase))
+        {
+            _Mode = PlanningMode.Standard;
+            return true;
+        }
+
+        if (value.Equals("2", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("analysis", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("strategic", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("strategy", StringComparison.OrdinalIgnoreCase))
+        {
+            _Mode = PlanningMode.Analysis;
+            return true;
+        }
+
+        return false;
     }
 }

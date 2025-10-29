@@ -21,13 +21,35 @@ public class PlanningRunner
     
     #region Run
 
-    public async Task RunAsync()
+    public async Task RunAsync(PlanningMode _Mode)
     {
-        PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: false);
-        Simulator simulator = snapshot.CreateSimulator();
+        bool includePlannedHours = _Mode == PlanningMode.Standard;
+
+        PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: includePlannedHours);
+        Simulator simulator = snapshot.CreateSimulator(_Mode == PlanningMode.Analysis ? IsAnalysisEpic : null);
         simulator.Run();
-        simulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
+
+        if (_Mode == PlanningMode.Standard)
+        {
+            simulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
+        }
+
         simulator.ExportGanttSprintBased(m_AppConfiguration.FileConfiguration.OutputPngFilePath);
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private static bool IsAnalysisEpic(Epic _Epic)
+    {
+        if (_Epic is null)
+        {
+            return false;
+        }
+
+        return _Epic.State.Equals("in analysis", StringComparison.OrdinalIgnoreCase)
+            || _Epic.State.Equals("pending analysis", StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion
