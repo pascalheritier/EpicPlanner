@@ -48,8 +48,14 @@ public class PlanningRunner
             return false;
         }
 
-        return _Epic.State.Equals("in analysis", StringComparison.OrdinalIgnoreCase)
-            || _Epic.State.Equals("pending analysis", StringComparison.OrdinalIgnoreCase);
+        string? state = _Epic.State;
+
+        if (string.IsNullOrWhiteSpace(state))
+        {
+            return false;
+        }
+
+        return state.Contains("analysis", StringComparison.OrdinalIgnoreCase);
     }
 
     #endregion
