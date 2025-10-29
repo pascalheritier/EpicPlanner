@@ -691,13 +691,13 @@ public class Simulator
             .Where(e => e.StartDate.HasValue && e.EndDate.HasValue)
             .Select(e =>
             {
-                int s0 = SprintIndex(e.StartDate.Value);
-                int s1 = SprintIndex(e.EndDate.Value);
+                float startPosition = SprintPosition(e.StartDate.Value, _bIsEnd: false);
+                float endPosition = SprintPosition(e.EndDate.Value, _bIsEnd: true);
                 var key = ExtractEpicKey(e.Name);
                 bool hatched = !e.EndAnalysis.HasValue && e.State.Contains("analysis", StringComparison.OrdinalIgnoreCase);
-                return new { e.Name, e.State, SprintStart = s0, SprintEnd = s1, Key = key, Hatched = hatched };
+                return new { e.Name, e.State, StartPosition = startPosition, EndPosition = endPosition, Key = key, Hatched = hatched };
             })
-            .OrderBy(r => r.SprintStart)
+            .OrderBy(r => r.StartPosition)
             .ThenBy(r => r.Key.Year).ThenBy(r => r.Key.Num)
             .ToList();
 
@@ -764,7 +764,8 @@ public class Simulator
         canvas.DrawText(title, leftLabelPad, 30, titlePaint);
 
         // Determine sprint range
-        int maxSprint = ranges.Count > 0 ? ranges.Max(r => r.SprintEnd) + 1 : 1;
+        float maxPosition = ranges.Count > 0 ? ranges.Max(r => r.EndPosition) : 0f;
+        int maxSprint = Math.Max(1, (int)Math.Ceiling(maxPosition));
 
         // Plot area
         var plotLeft = leftLabelPad;
@@ -830,8 +831,8 @@ public class Simulator
             var r = ranges[i];
             int rowYIndex = i;
             float cy = plotTop + rowYIndex * rowHeight + rowHeight * 0.5f;
-            float xs = plotLeft + r.SprintStart * xStep;
-            float xe = plotLeft + (r.SprintEnd + 1) * xStep; // inclusive end
+            float xs = plotLeft + r.StartPosition * xStep;
+            float xe = plotLeft + r.EndPosition * xStep;
             float barH = Math.Min(18f, rowHeight - 6f);
 
             SKColor fill = r.State.Contains("pending") && r.State.Contains("analysis") ? BORDEAUX :
@@ -939,7 +940,24 @@ public class Simulator
         return (9999, 9999);
     }
 
-    private int SprintIndex(DateTime _SprintDate) => (int)((_SprintDate.Date - m_InitialSprintDate.Date).TotalDays / m_iSprintDays);
+    private int SprintIndex(DateTime _DateSprint) => (int)((_DateSprint.Date - m_InitialSprintDate.Date).TotalDays / m_iSprintDays);
+
+    private float SprintPosition(DateTime _Date, bool _bIsEnd)
+    {
+        int iSprintDays = m_iSprintDays <= 0 ? 1 : m_iSprintDays;
+        double dTotalDays = (_Date.Date - m_InitialSprintDate.Date).TotalDays;
+        if (dTotalDays < 0)
+        {
+            dTotalDays = 0;
+        }
+
+        if (_bIsEnd)
+        {
+            dTotalDays += 1.0;
+        }
+
+        return (float)(dTotalDays / iSprintDays);
+    }
 
     private DateTime SprintStartDate(int _iSprintIndex) => m_InitialSprintDate.AddDays(_iSprintIndex * m_iSprintDays);
 

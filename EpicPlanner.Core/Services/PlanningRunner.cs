@@ -106,14 +106,27 @@ public class PlanningRunner
 
     private static void AlignAnalysisEpicsToEndDates(
         IReadOnlyList<Epic> _Epics,
-        DateTime _InitialSprintStart,
-        int _SprintLengthDays,
-        int _MaxSprintCount)
+        DateTime _DateInitialSprintStart,
+        int _iSprintLengthDays,
+        int _iMaxSprintCount)
     {
-        DateTime timelineStart = _InitialSprintStart.Date;
-        int sprintLength = Math.Max(1, _SprintLengthDays);
-        int sprintCount = Math.Max(1, _MaxSprintCount);
+        DateTime timelineStart = _DateInitialSprintStart.Date;
+        int sprintLength = Math.Max(1, _iSprintLengthDays);
+        int sprintCount = Math.Max(1, _iMaxSprintCount);
         DateTime timelineEnd = timelineStart.AddDays(sprintLength * sprintCount - 1);
+
+        DateTime? latestAnalysisEndDate = null;
+        foreach (Epic epic in _Epics)
+        {
+            if (IsAnalysisState(epic) && epic.EndAnalysis.HasValue)
+            {
+                DateTime candidate = epic.EndAnalysis.Value.Date;
+                if (latestAnalysisEndDate is null || candidate > latestAnalysisEndDate.Value)
+                {
+                    latestAnalysisEndDate = candidate;
+                }
+            }
+        }
 
         foreach (Epic epic in _Epics)
         {
@@ -138,8 +151,14 @@ public class PlanningRunner
                 }
                 else
                 {
+                    DateTime cappedEnd = latestAnalysisEndDate ?? timelineEnd;
+                    if (cappedEnd < timelineStart)
+                    {
+                        cappedEnd = timelineStart;
+                    }
+
                     epic.StartDate = timelineStart;
-                    epic.EndDate = timelineEnd;
+                    epic.EndDate = cappedEnd;
                 }
 
                 continue;
@@ -153,21 +172,21 @@ public class PlanningRunner
         }
     }
 
-    private static DateTime SprintStartForDate(DateTime _Date, DateTime _InitialSprintStart, int _SprintLengthDays)
+    private static DateTime SprintStartForDate(DateTime _Date, DateTime _DateInitialSprintStart, int _iSprintLengthDays)
     {
-        if (_SprintLengthDays <= 0)
+        if (_iSprintLengthDays <= 0)
         {
-            return _InitialSprintStart;
+            return _DateInitialSprintStart;
         }
 
-        double totalDays = (_Date.Date - _InitialSprintStart.Date).TotalDays;
-        int sprintIndex = (int)Math.Floor(totalDays / _SprintLengthDays);
+        double totalDays = (_Date.Date - _DateInitialSprintStart.Date).TotalDays;
+        int sprintIndex = (int)Math.Floor(totalDays / _iSprintLengthDays);
         if (sprintIndex < 0)
         {
             sprintIndex = 0;
         }
 
-        return _InitialSprintStart.Date.AddDays(sprintIndex * _SprintLengthDays);
+        return _DateInitialSprintStart.Date.AddDays(sprintIndex * _iSprintLengthDays);
     }
 
     private static bool IsAnalysisState(Epic _Epic) =>
