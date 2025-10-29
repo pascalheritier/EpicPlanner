@@ -281,12 +281,24 @@ public class RedmineDataFetcher
             }
         }
 
-        if (plannedEpicSet != null)
+        int plannedEpicCount = _PlannedEpics?.Count ?? 0;
+
+        if (plannedEpicSet != null && plannedEpicCount > 0)
         {
-            foreach (string epicName in summaries.Keys.Where(k => !plannedEpicSet.Contains(k)).ToList())
+            var orderedSummaries = new List<SprintEpicSummary>(plannedEpicCount);
+            foreach (string plannedEpic in _PlannedEpics!)
             {
-                summaries.Remove(epicName);
+                if (summaries.TryGetValue(plannedEpic, out SprintEpicSummary? existing))
+                {
+                    orderedSummaries.Add(existing);
+                }
+                else
+                {
+                    orderedSummaries.Add(new SprintEpicSummary { Epic = plannedEpic });
+                }
             }
+
+            return orderedSummaries;
         }
 
         return summaries.Values
