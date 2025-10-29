@@ -62,7 +62,7 @@ public class PlanningDataProvider
         Dictionary<string, double> plannedHours = new(StringComparer.OrdinalIgnoreCase);
         List<SprintEpicSummary> epicSummaries = new();
         HashSet<string> plannedEpicNames = epics
-            .Where(e => e.Wishes.Count > 0 && e.Remaining > 0)
+            .Where(e => e.IsInDevelopment)
             .Select(e => e.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (_bIncludePlannedHours)
