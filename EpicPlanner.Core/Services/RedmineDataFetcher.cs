@@ -178,6 +178,36 @@ public class RedmineDataFetcher
             }
         }
 
+        if (plannedEpicSet != null && plannedEpicSet.Count > 0)
+        {
+            Dictionary<int, string> enumerationLookup = await GetEpicEnumerationLookupAsync().ConfigureAwait(false);
+            var nameToEnumerationId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in enumerationLookup)
+            {
+                string? normalizedName = NormalizeEpicName(kvp.Value);
+                if (string.IsNullOrWhiteSpace(normalizedName))
+                    continue;
+
+                if (!nameToEnumerationId.ContainsKey(normalizedName))
+                    nameToEnumerationId[normalizedName] = kvp.Key;
+            }
+
+            foreach (string plannedEpic in plannedEpicSet)
+            {
+                if (!descriptors.ContainsKey(plannedEpic))
+                {
+                    int? enumerationId = null;
+                    if (nameToEnumerationId.TryGetValue(plannedEpic, out int resolvedId))
+                        enumerationId = resolvedId;
+
+                    descriptors[plannedEpic] = new EpicDescriptor(plannedEpic, enumerationId);
+                }
+
+                if (!summaries.ContainsKey(plannedEpic))
+                    summaries[plannedEpic] = new SprintEpicSummary { Epic = plannedEpic };
+            }
+        }
+
         Dictionary<string, EpicTodoCache> todoCaches = await BuildEpicTodoCachesAsync(descriptors.Values).ConfigureAwait(false);
         var todoIssueToEpic = new Dictionary<int, string>();
 
@@ -248,6 +278,14 @@ public class RedmineDataFetcher
             else
             {
                 summary.Remaining = 0.0;
+            }
+        }
+
+        if (plannedEpicSet != null)
+        {
+            foreach (string epicName in summaries.Keys.Where(k => !plannedEpicSet.Contains(k)).ToList())
+            {
+                summaries.Remove(epicName);
             }
         }
 
