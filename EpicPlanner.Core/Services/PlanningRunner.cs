@@ -36,7 +36,11 @@ public class PlanningRunner
             HashSet<string> analysisScope = BuildAnalysisScope(snapshot.Epics);
             Simulator simulator = snapshot.CreateSimulator(epic => analysisScope.Contains(epic.Name));
             simulator.Run();
-            AlignAnalysisEpicsToEndDates(simulator.Epics);
+            AlignAnalysisEpicsToEndDates(
+                simulator.Epics,
+                simulator.InitialSprintDate,
+                simulator.SprintLengthDays,
+                simulator.MaxSprintCount);
 
             simulator.ExportGanttSprintBased(
                 m_AppConfiguration.FileConfiguration.OutputPngFilePath,
@@ -100,22 +104,42 @@ public class PlanningRunner
         return included;
     }
 
-    private static void AlignAnalysisEpicsToEndDates(IReadOnlyList<Epic> _Epics)
+    private static void AlignAnalysisEpicsToEndDates(
+        IReadOnlyList<Epic> _Epics,
+        DateTime _InitialSprintStart,
+        int _SprintLengthDays,
+        int _MaxSprintCount)
     {
+        DateTime timelineStart = _InitialSprintStart.Date;
+        int sprintLength = Math.Max(1, _SprintLengthDays);
+        int sprintCount = Math.Max(1, _MaxSprintCount);
+        DateTime timelineEnd = timelineStart.AddDays(sprintLength * sprintCount - 1);
+
         foreach (Epic epic in _Epics)
         {
             if (IsAnalysisState(epic))
             {
+                bool isPending = epic.State.Contains("pending", StringComparison.OrdinalIgnoreCase);
+
                 if (epic.EndAnalysis.HasValue)
                 {
                     DateTime end = epic.EndAnalysis.Value.Date;
-                    epic.StartDate = end;
+                    if (end < timelineStart)
+                    {
+                        end = timelineStart;
+                    }
+
+                    DateTime start = isPending
+                        ? SprintStartForDate(end, timelineStart, sprintLength)
+                        : timelineStart;
+
+                    epic.StartDate = start;
                     epic.EndDate = end;
                 }
                 else
                 {
-                    epic.StartDate = null;
-                    epic.EndDate = null;
+                    epic.StartDate = timelineStart;
+                    epic.EndDate = timelineEnd;
                 }
 
                 continue;
@@ -127,6 +151,23 @@ public class PlanningRunner
             epic.StartDate = null;
             epic.EndDate = null;
         }
+    }
+
+    private static DateTime SprintStartForDate(DateTime _Date, DateTime _InitialSprintStart, int _SprintLengthDays)
+    {
+        if (_SprintLengthDays <= 0)
+        {
+            return _InitialSprintStart;
+        }
+
+        double totalDays = (_Date.Date - _InitialSprintStart.Date).TotalDays;
+        int sprintIndex = (int)Math.Floor(totalDays / _SprintLengthDays);
+        if (sprintIndex < 0)
+        {
+            sprintIndex = 0;
+        }
+
+        return _InitialSprintStart.Date.AddDays(sprintIndex * _SprintLengthDays);
     }
 
     private static bool IsAnalysisState(Epic _Epic) =>

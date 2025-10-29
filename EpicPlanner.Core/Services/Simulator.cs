@@ -64,6 +64,9 @@ public class Simulator
     #region Properties
 
     public IReadOnlyList<Epic> Epics => m_Epics;
+    public DateTime InitialSprintDate => m_InitialSprintDate;
+    public int SprintLengthDays => m_iSprintDays;
+    public int MaxSprintCount => m_iMaxSprintCount;
 
     #endregion
 
@@ -691,7 +694,8 @@ public class Simulator
                 int s0 = SprintIndex(e.StartDate.Value);
                 int s1 = SprintIndex(e.EndDate.Value);
                 var key = ExtractEpicKey(e.Name);
-                return new { e.Name, e.State, SprintStart = s0, SprintEnd = s1, Key = key };
+                bool hatched = !e.EndAnalysis.HasValue && e.State.Contains("analysis", StringComparison.OrdinalIgnoreCase);
+                return new { e.Name, e.State, SprintStart = s0, SprintEnd = s1, Key = key, Hatched = hatched };
             })
             .OrderBy(r => r.SprintStart)
             .ThenBy(r => r.Key.Year).ThenBy(r => r.Key.Num)
@@ -788,6 +792,38 @@ public class Simulator
             canvas.DrawLine(x, plotTop, x, plotBottom, gridPaintV);
         }
 
+        void DrawHatchedRect(SKRect rect, SKColor baseColor)
+        {
+            SKColor fillColor = new(baseColor.Red, baseColor.Green, baseColor.Blue, 160);
+            SKColor lineColor = new(baseColor.Red, baseColor.Green, baseColor.Blue, 220);
+
+            using (var fillPaint = new SKPaint { Color = fillColor, IsAntialias = true, Style = SKPaintStyle.Fill })
+            {
+                canvas.DrawRect(rect, fillPaint);
+            }
+
+            using var hatchPaint = new SKPaint
+            {
+                Color = lineColor,
+                IsAntialias = true,
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = 1.5f
+            };
+
+            float spacing = 6f;
+            float width = rect.Width;
+            float height = rect.Height;
+
+            for (float offset = -height; offset < width; offset += spacing)
+            {
+                float startX = rect.Left + MathF.Max(0f, offset);
+                float startY = rect.Top + MathF.Max(0f, -offset);
+                float endX = rect.Left + MathF.Min(width, offset + height);
+                float endY = rect.Top + MathF.Min(height, height + offset);
+                canvas.DrawLine(startX, startY, endX, endY, hatchPaint);
+            }
+        }
+
         // Bars and left labels
         for (int i = 0; i < ranges.Count; i++)
         {
@@ -804,9 +840,16 @@ public class Simulator
                            r.State.Contains("develop") && !r.State.Contains("pending") ? LIGHT_GREEN :
                            SKColors.LightGray;
 
-            using var barPaint = new SKPaint { Color = fill, IsAntialias = true, Style = SKPaintStyle.Fill };
             var rect = new SKRect(xs, cy - barH / 2f, xe, cy + barH / 2f);
-            canvas.DrawRect(rect, barPaint);
+            if (r.Hatched)
+            {
+                DrawHatchedRect(rect, fill);
+            }
+            else
+            {
+                using var barPaint = new SKPaint { Color = fill, IsAntialias = true, Style = SKPaintStyle.Fill };
+                canvas.DrawRect(rect, barPaint);
+            }
 
             // Epic label to the left (outside)
             labelPaint.TextAlign = SKTextAlign.Right;
@@ -841,19 +884,27 @@ public class Simulator
         float lgY = topTitlePad + 20;
         float box = 16f;
 
-        var legendItems = new List<(string Label, SKColor Color)>
+        var legendItems = new List<(string Label, SKColor Color, bool Hatched)>
             {
-                ("In Development", LIGHT_GREEN),
-                ("In Analysis", MAUVE),
-                ("Pending Analysis", BORDEAUX),
-                ("Pending Development", LIGHT_BLUE)
+                ("In Development", LIGHT_GREEN, false),
+                ("In Analysis", MAUVE, false),
+                ("Pending Analysis", BORDEAUX, false),
+                ("Pending Development", LIGHT_BLUE, false),
+                ("Analysis (no end date)", MAUVE, true)
             };
 
         foreach (var item in legendItems)
         {
-            using var paint = new SKPaint { Color = item.Color, IsAntialias = true, Style = SKPaintStyle.Fill };
             var rect = new SKRect(lgX, lgY, lgX + box, lgY + box);
-            canvas.DrawRect(rect, paint);
+            if (item.Hatched)
+            {
+                DrawHatchedRect(rect, item.Color);
+            }
+            else
+            {
+                using var paint = new SKPaint { Color = item.Color, IsAntialias = true, Style = SKPaintStyle.Fill };
+                canvas.DrawRect(rect, paint);
+            }
 
             labelPaint.TextAlign = SKTextAlign.Left;
             canvas.DrawText(item.Label, lgX + box + 10, lgY + box - 3, labelPaint);
