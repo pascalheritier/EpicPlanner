@@ -133,15 +133,15 @@ internal class Program
         }
     }
 
-    private static bool TryParsePlanningMode(string? _Input, out PlanningMode _Mode)
+    private static bool TryParsePlanningMode(string? _strInput, out PlanningMode _enumMode)
     {
-        _Mode = PlanningMode.Standard;
-        if (string.IsNullOrWhiteSpace(_Input))
+        _enumMode = PlanningMode.Standard;
+        if (string.IsNullOrWhiteSpace(_strInput))
         {
             return false;
         }
 
-        string value = _Input.Trim();
+        string value = _strInput.Trim();
 
         if (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("standard", StringComparison.OrdinalIgnoreCase) ||
@@ -149,7 +149,7 @@ internal class Program
             value.Equals("planning", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("sprint", StringComparison.OrdinalIgnoreCase))
         {
-            _Mode = PlanningMode.Standard;
+            _enumMode = PlanningMode.Standard;
             return true;
         }
 
@@ -158,7 +158,7 @@ internal class Program
             value.Equals("strategic", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("strategy", StringComparison.OrdinalIgnoreCase))
         {
-            _Mode = PlanningMode.Analysis;
+            _enumMode = PlanningMode.Analysis;
             return true;
         }
 

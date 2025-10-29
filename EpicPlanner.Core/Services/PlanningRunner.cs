@@ -25,13 +25,13 @@ public class PlanningRunner
     
     #region Run
 
-    public async Task RunAsync(PlanningMode _Mode)
+    public async Task RunAsync(PlanningMode _enumMode)
     {
-        bool includePlannedHours = _Mode == PlanningMode.Standard;
+        bool includePlannedHours = _enumMode == PlanningMode.Standard;
 
         PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: includePlannedHours);
 
-        if (_Mode == PlanningMode.Analysis)
+        if (_enumMode == PlanningMode.Analysis)
         {
             HashSet<string> analysisScope = BuildAnalysisScope(snapshot.Epics);
             Simulator simulator = snapshot.CreateSimulator(epic => analysisScope.Contains(epic.Name));

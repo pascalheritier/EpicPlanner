@@ -684,7 +684,7 @@ public class Simulator
         epicSheet.Cells.AutoFitColumns();
     }
 
-    public void ExportGanttSprintBased(string _strOutputPngPath, PlanningMode _Mode)
+    public void ExportGanttSprintBased(string _strOutputPngPath, PlanningMode _enumMode)
     {
         // Build ranges per epic from allocations
         var ranges = m_Epics
@@ -758,7 +758,7 @@ public class Simulator
         SKColor BAR_BORDER = new SKColor(0, 0, 0, 0); // no border as requested
 
         // Title
-        string title = _Mode == PlanningMode.Analysis
+        string title = _enumMode == PlanningMode.Analysis
             ? "Gantt - Sprints (Analysis duration)"
             : "Gantt - Sprints (Realisation duration)";
         canvas.DrawText(title, leftLabelPad, 30, titlePaint);
@@ -891,14 +891,22 @@ public class Simulator
         float lgY = topTitlePad + 20;
         float box = 16f;
 
-        var legendItems = new List<(string Label, SKColor Color, bool Hatched)>
-            {
-                ("In Development", LIGHT_GREEN, false),
-                ("In Analysis", MAUVE, false),
-                ("Pending Analysis", BORDEAUX, false),
-                ("Pending Development", LIGHT_BLUE, false),
-                ("Analysis (no end date)", MAUVE, true)
-            };
+        List<(string Label, SKColor Color, bool Hatched)> legendItems =
+            _enumMode == PlanningMode.Analysis
+                ? new List<(string Label, SKColor Color, bool Hatched)>
+                {
+                    ("In Analysis", MAUVE, false),
+                    ("Pending Analysis", BORDEAUX, false),
+                    ("Analysis (no end date)", MAUVE, true)
+                }
+                : new List<(string Label, SKColor Color, bool Hatched)>
+                {
+                    ("In Development", LIGHT_GREEN, false),
+                    ("In Analysis", MAUVE, false),
+                    ("Pending Analysis", BORDEAUX, false),
+                    ("Pending Development", LIGHT_BLUE, false),
+                    ("Analysis (no end date)", MAUVE, true)
+                };
 
         foreach (var item in legendItems)
         {
