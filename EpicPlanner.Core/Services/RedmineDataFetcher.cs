@@ -27,22 +27,22 @@ public class RedmineDataFetcher
 
     #region Constructor
 
-    public RedmineDataFetcher(string _strBaseUrl, string _strApiKey)
+    public RedmineDataFetcher(string _BaseUrl, string _ApiKey)
     {
-        if (string.IsNullOrWhiteSpace(_strBaseUrl))
-            throw new ArgumentException("Redmine base URL must be provided.", nameof(_strBaseUrl));
+        if (string.IsNullOrWhiteSpace(_BaseUrl))
+            throw new ArgumentException("Redmine base URL must be provided.", nameof(_BaseUrl));
 
         m_RedmineManager = new RedmineManager(new RedmineManagerOptionsBuilder()
-            .WithHost(_strBaseUrl)
-            .WithApiKeyAuthentication(_strApiKey));
+            .WithHost(_BaseUrl)
+            .WithApiKeyAuthentication(_ApiKey));
 
-        string normalizedBaseUrl = _strBaseUrl.EndsWith("/") ? _strBaseUrl : _strBaseUrl + "/";
+        string normalizedBaseUrl = _BaseUrl.EndsWith("/") ? _BaseUrl : _BaseUrl + "/";
 
         m_HttpClient = new HttpClient
         {
             BaseAddress = new Uri(normalizedBaseUrl)
         };
-        m_HttpClient.DefaultRequestHeaders.Add("X-Redmine-API-Key", _strApiKey);
+        m_HttpClient.DefaultRequestHeaders.Add("X-Redmine-API-Key", _ApiKey);
     }
 
     #endregion
@@ -78,11 +78,11 @@ public class RedmineDataFetcher
         int _iSprintNumber,
         DateTime _dtSprintStart,
         DateTime _dtSprintEnd,
-        IReadOnlyCollection<string> _colstrPlannedEpics)
+        IReadOnlyCollection<string> _PlannedEpics)
     {
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        HashSet<string>? plannedEpicSet = (_colstrPlannedEpics?.Count ?? 0) > 0
-            ? new HashSet<string>(_colstrPlannedEpics, StringComparer.OrdinalIgnoreCase)
+        HashSet<string>? plannedEpicSet = (_PlannedEpics?.Count ?? 0) > 0
+            ? new HashSet<string>(_PlannedEpics, StringComparer.OrdinalIgnoreCase)
             : null;
 
         Dictionary<int, Issue>? parentCache = plannedEpicSet != null
@@ -128,16 +128,16 @@ public class RedmineDataFetcher
         int _iSprintNumber,
         DateTime _dtSprintStart,
         DateTime _dtSprintEnd,
-        IReadOnlyCollection<string> _colstrPlannedEpics,
-        IReadOnlyDictionary<string, double>? _dicstrdPlannedCapacityByEpic = null)
+        IReadOnlyCollection<string> _PlannedEpics,
+        IReadOnlyDictionary<string, double>? _PlannedCapacityByEpic = null)
     {
         var summaries = new Dictionary<string, SprintEpicSummary>(StringComparer.OrdinalIgnoreCase);
         var descriptors = new Dictionary<string, EpicDescriptor>(StringComparer.OrdinalIgnoreCase);
         var sprintRemaining = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        HashSet<string>? plannedEpicSet = (_colstrPlannedEpics?.Count ?? 0) > 0
-            ? new HashSet<string>(_colstrPlannedEpics, StringComparer.OrdinalIgnoreCase)
+        HashSet<string>? plannedEpicSet = (_PlannedEpics?.Count ?? 0) > 0
+            ? new HashSet<string>(_PlannedEpics, StringComparer.OrdinalIgnoreCase)
             : null;
-        bool hasSheetPlannedCapacity = _dicstrdPlannedCapacityByEpic != null && _dicstrdPlannedCapacityByEpic.Count > 0;
+        bool hasSheetPlannedCapacity = _PlannedCapacityByEpic != null && _PlannedCapacityByEpic.Count > 0;
 
         List<Issue> sprintIssues = (await GetSprintIssuesAsync(_iSprintNumber)).ToList();
 
@@ -258,7 +258,7 @@ public class RedmineDataFetcher
         {
             foreach (var summary in summaries.Values)
             {
-                if (_dicstrdPlannedCapacityByEpic!.TryGetValue(summary.Epic, out double plannedCapacity))
+                if (_PlannedCapacityByEpic!.TryGetValue(summary.Epic, out double plannedCapacity))
                 {
                     summary.PlannedCapacity = plannedCapacity;
                 }
@@ -281,12 +281,12 @@ public class RedmineDataFetcher
             }
         }
 
-        int plannedEpicCount = _colstrPlannedEpics?.Count ?? 0;
+        int plannedEpicCount = _PlannedEpics?.Count ?? 0;
 
         if (plannedEpicSet != null && plannedEpicCount > 0)
         {
             var orderedSummaries = new List<SprintEpicSummary>(plannedEpicCount);
-            foreach (string plannedEpic in _colstrPlannedEpics!)
+            foreach (string plannedEpic in _PlannedEpics!)
             {
                 if (summaries.TryGetValue(plannedEpic, out SprintEpicSummary? existing))
                 {
@@ -362,14 +362,14 @@ public class RedmineDataFetcher
     }
 
     private async Task<EpicDescriptor> ResolveEpicDescriptorAsync(
-        Issue _issue,
-        Dictionary<int, Issue> _dicParentCache)
+        Issue _Issue,
+        Dictionary<int, Issue> _ParentCache)
     {
-        EpicCustomFieldValue? directValue = await ExtractEpicCustomFieldValueAsync(_issue).ConfigureAwait(false);
+        EpicCustomFieldValue? directValue = await ExtractEpicCustomFieldValueAsync(_Issue).ConfigureAwait(false);
         if (directValue != null)
             return CreateDescriptor(directValue);
 
-        Issue? parent = await GetParentIssueAsync(_issue, _dicParentCache).ConfigureAwait(false);
+        Issue? parent = await GetParentIssueAsync(_Issue, _ParentCache).ConfigureAwait(false);
         if (parent != null)
         {
             EpicCustomFieldValue? parentValue = await ExtractEpicCustomFieldValueAsync(parent).ConfigureAwait(false);
@@ -377,7 +377,7 @@ public class RedmineDataFetcher
                 return CreateDescriptor(parentValue);
         }
 
-        string? fromSubject = NormalizeEpicName(ExtractEpicFromSubject(_issue));
+        string? fromSubject = NormalizeEpicName(ExtractEpicFromSubject(_Issue));
         if (!string.IsNullOrWhiteSpace(fromSubject))
             return new EpicDescriptor(fromSubject, null);
 
@@ -391,20 +391,20 @@ public class RedmineDataFetcher
         return new EpicDescriptor("(No Epic)", null);
     }
 
-    private static string? NormalizeEpicName(string? _strRawEpicValue)
+    private static string? NormalizeEpicName(string? _RawEpicValue)
     {
-        if (string.IsNullOrWhiteSpace(_strRawEpicValue))
+        if (string.IsNullOrWhiteSpace(_RawEpicValue))
             return null;
 
-        return _strRawEpicValue.Trim();
+        return _RawEpicValue.Trim();
     }
 
-    private async Task<EpicCustomFieldValue?> ExtractEpicCustomFieldValueAsync(Issue _issue)
+    private async Task<EpicCustomFieldValue?> ExtractEpicCustomFieldValueAsync(Issue _Issue)
     {
-        if (_issue.CustomFields == null)
+        if (_Issue.CustomFields == null)
             return null;
 
-        IssueCustomField? epicField = _issue.CustomFields
+        IssueCustomField? epicField = _Issue.CustomFields
             .FirstOrDefault(cf => cf.Id == EpicCustomFieldId);
 
         if (epicField == null || epicField.Values == null)
@@ -441,12 +441,12 @@ public class RedmineDataFetcher
         };
     }
 
-    private static string? ExtractEpicFromSubject(Issue _issue)
+    private static string? ExtractEpicFromSubject(Issue _Issue)
     {
-        if (string.IsNullOrWhiteSpace(_issue.Subject))
+        if (string.IsNullOrWhiteSpace(_Issue.Subject))
             return null;
 
-        var match = Regex.Match(_issue.Subject, @"\[(?<epic>[^\]]+)\]");
+        var match = Regex.Match(_Issue.Subject, @"\[(?<epic>[^\]]+)\]");
         if (!match.Success)
             return null;
 
@@ -454,18 +454,18 @@ public class RedmineDataFetcher
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
-    private async Task<Issue?> GetParentIssueAsync(Issue _issue, Dictionary<int, Issue> _dicParentCache)
+    private async Task<Issue?> GetParentIssueAsync(Issue _Issue, Dictionary<int, Issue> _ParentCache)
     {
-        int? parentId = _issue.ParentIssue?.Id;
+        int? parentId = _Issue.ParentIssue?.Id;
         if (!parentId.HasValue)
             return null;
 
-        if (_dicParentCache.TryGetValue(parentId.Value, out Issue? cached))
+        if (_ParentCache.TryGetValue(parentId.Value, out Issue? cached))
             return cached;
 
         Issue? parent = await GetIssueByIdAsync(parentId.Value);
         if (parent != null)
-            _dicParentCache[parentId.Value] = parent;
+            _ParentCache[parentId.Value] = parent;
 
         return parent;
     }
@@ -480,21 +480,21 @@ public class RedmineDataFetcher
         return (await GetIssuesAsync(parameters)).FirstOrDefault();
     }
 
-    private static EpicDescriptor CreateDescriptor(EpicCustomFieldValue _value)
+    private static EpicDescriptor CreateDescriptor(EpicCustomFieldValue _Value)
     {
-        string? normalized = NormalizeEpicName(_value.Label);
-        if (string.IsNullOrWhiteSpace(normalized) && !string.IsNullOrWhiteSpace(_value.RawValue))
-            normalized = NormalizeEpicName(_value.RawValue);
+        string? normalized = NormalizeEpicName(_Value.Label);
+        if (string.IsNullOrWhiteSpace(normalized) && !string.IsNullOrWhiteSpace(_Value.RawValue))
+            normalized = NormalizeEpicName(_Value.RawValue);
 
         string name = normalized ?? "(No Epic)";
-        return new EpicDescriptor(name, _value.EnumerationId);
+        return new EpicDescriptor(name, _Value.EnumerationId);
     }
 
-    private async Task<Dictionary<string, EpicTodoCache>> BuildEpicTodoCachesAsync(IEnumerable<EpicDescriptor> _enuDescriptors)
+    private async Task<Dictionary<string, EpicTodoCache>> BuildEpicTodoCachesAsync(IEnumerable<EpicDescriptor> _Descriptors)
     {
         var caches = new Dictionary<string, EpicTodoCache>(StringComparer.OrdinalIgnoreCase);
 
-        var groupedById = _enuDescriptors
+        var groupedById = _Descriptors
             .Where(d => d.HasEnumeration)
             .GroupBy(d => d.EnumerationId!.Value);
 
@@ -557,14 +557,14 @@ public class RedmineDataFetcher
         return parents.Values.ToList();
     }
 
-    private async Task<List<Issue>> FetchTodoDescendantsAsync(IEnumerable<Issue> _enuParentIssues)
+    private async Task<List<Issue>> FetchTodoDescendantsAsync(IEnumerable<Issue> _ParentIssues)
     {
         var todoIssues = new List<Issue>();
         HashSet<int> countedTodoIds = new();
         HashSet<int> visitedParents = new();
         Queue<int> parentsToVisit = new();
 
-        foreach (Issue parent in _enuParentIssues)
+        foreach (Issue parent in _ParentIssues)
         {
             if (parent == null)
                 continue;
@@ -611,9 +611,9 @@ public class RedmineDataFetcher
         return todoIssues;
     }
 
-    private static double ExtractRemaining(Issue _issue)
+    private static double ExtractRemaining(Issue _Issue)
     {
-        IssueCustomField? estimation = _issue.CustomFields?.FirstOrDefault(_Field => _Field.Name == "Reste à faire");
+        IssueCustomField? estimation = _Issue.CustomFields?.FirstOrDefault(_Field => _Field.Name == "Reste à faire");
         if (estimation == null)
             return 0.0;
 
@@ -631,13 +631,13 @@ public class RedmineDataFetcher
         return 0.0;
     }
 
-    private async Task<IEnumerable<Issue>> GetIssuesAsync(NameValueCollection _nvcParameters)
+    private async Task<IEnumerable<Issue>> GetIssuesAsync(NameValueCollection _Parameters)
     {
         try
         {
             RequestOptions requestOptions = new RequestOptions
             {
-                QueryString = _nvcParameters
+                QueryString = _Parameters
             };
             IEnumerable<Issue>? foundIssues = await m_RedmineManager.GetAsync<Issue>(requestOptions);
             if (foundIssues is not null)
@@ -747,10 +747,10 @@ public class RedmineDataFetcher
         }
     }
 
-    private static Dictionary<int, string> ConvertEnumerationsToLookup(IEnumerable<CustomFieldEnumeration> _enuEnumerations)
+    private static Dictionary<int, string> ConvertEnumerationsToLookup(IEnumerable<CustomFieldEnumeration> _Enumerations)
     {
         var map = new Dictionary<int, string>();
-        foreach (CustomFieldEnumeration enumeration in _enuEnumerations)
+        foreach (CustomFieldEnumeration enumeration in _Enumerations)
         {
             if (enumeration == null)
                 continue;
@@ -783,9 +783,9 @@ public class RedmineDataFetcher
     {
         public static readonly EpicTodoCache Empty = new(new HashSet<int>(), 0.0);
 
-        public EpicTodoCache(HashSet<int> _setiTodoIssueIds, double _dTotalRemaining)
+        public EpicTodoCache(HashSet<int> _TodoIssueIds, double _dTotalRemaining)
         {
-            TodoIssueIds = _setiTodoIssueIds;
+            TodoIssueIds = _TodoIssueIds;
             TotalRemaining = _dTotalRemaining;
         }
 
@@ -796,9 +796,9 @@ public class RedmineDataFetcher
 
     private sealed class EpicDescriptor
     {
-        public EpicDescriptor(string _strName, int? _iEnumerationId)
+        public EpicDescriptor(string _Name, int? _iEnumerationId)
         {
-            Name = _strName;
+            Name = _Name;
             EnumerationId = _iEnumerationId;
         }
 
@@ -899,12 +899,12 @@ public class RedmineDataFetcher
         public int Id { get; set; }
     }
 
-    private static int TryParseEnumerationId(string? _strValue)
+    private static int TryParseEnumerationId(string? _Value)
     {
-        if (string.IsNullOrWhiteSpace(_strValue))
+        if (string.IsNullOrWhiteSpace(_Value))
             return 0;
 
-        return int.TryParse(_strValue.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
+        return int.TryParse(_Value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
             ? parsed
             : 0;
     }

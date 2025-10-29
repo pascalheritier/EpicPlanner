@@ -19,12 +19,12 @@ public class PlanningDataProvider
 
     #region Constructor
 
-    public PlanningDataProvider(AppConfiguration _cfgApp)
+    public PlanningDataProvider(AppConfiguration _AppConfiguration)
     {
-        m_AppConfiguration = _cfgApp ?? throw new ArgumentNullException(nameof(_cfgApp));
-        m_InitialSprintStart = _cfgApp.PlannerConfiguration.InitialSprintStartDate;
-        m_iSprintDays = _cfgApp.PlannerConfiguration.SprintDays;
-        m_iSprintCapacityDays = _cfgApp.PlannerConfiguration.SprintCapacityDays;
+        m_AppConfiguration = _AppConfiguration ?? throw new ArgumentNullException(nameof(_AppConfiguration));
+        m_InitialSprintStart = _AppConfiguration.PlannerConfiguration.InitialSprintStartDate;
+        m_iSprintDays = _AppConfiguration.PlannerConfiguration.SprintDays;
+        m_iSprintCapacityDays = _AppConfiguration.PlannerConfiguration.SprintCapacityDays;
     }
 
     #endregion
@@ -95,22 +95,22 @@ public class PlanningDataProvider
     }
 
     private static Dictionary<string, double> LoadPlannedCapacityLookup(
-        ExcelPackage _pkgPrimary,
-        string _strPrimaryFilePath,
-        string? _strOverrideFilePath,
+        ExcelPackage _PrimaryPackage,
+        string _PrimaryFilePath,
+        string? _OverrideFilePath,
         int _iInitialSprintNumber)
     {
-        ExcelWorksheet? fallbackWorksheet = _pkgPrimary.Workbook.Worksheets["AllocationsByEpicPerSprint"];
+        ExcelWorksheet? fallbackWorksheet = _PrimaryPackage.Workbook.Worksheets["AllocationsByEpicPerSprint"];
 
-        if (string.IsNullOrWhiteSpace(_strOverrideFilePath))
+        if (string.IsNullOrWhiteSpace(_OverrideFilePath))
         {
             return ReadPlannedCapacityByEpic(fallbackWorksheet, _iInitialSprintNumber);
         }
 
         try
         {
-            string resolvedOverridePath = Path.GetFullPath(_strOverrideFilePath);
-            string resolvedPrimaryPath = Path.GetFullPath(_strPrimaryFilePath);
+            string resolvedOverridePath = Path.GetFullPath(_OverrideFilePath);
+            string resolvedPrimaryPath = Path.GetFullPath(_PrimaryFilePath);
 
             if (string.Equals(resolvedOverridePath, resolvedPrimaryPath, StringComparison.OrdinalIgnoreCase))
             {
@@ -136,21 +136,21 @@ public class PlanningDataProvider
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Warning: Failed to load planned capacity file '{_strOverrideFilePath}': {ex.Message}");
+            Console.WriteLine($"Warning: Failed to load planned capacity file '{_OverrideFilePath}': {ex.Message}");
             return ReadPlannedCapacityByEpic(fallbackWorksheet, _iInitialSprintNumber);
         }
     }
 
-    private static Dictionary<string, double> ReadPlannedCapacityByEpic(ExcelWorksheet? _wsWorksheet, int _iInitialSprintNumber)
+    private static Dictionary<string, double> ReadPlannedCapacityByEpic(ExcelWorksheet? _Worksheet, int _iInitialSprintNumber)
     {
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        if (_wsWorksheet?.Dimension == null)
+        if (_Worksheet?.Dimension == null)
             return result;
 
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (int col = 1; col <= _wsWorksheet.Dimension.End.Column; col++)
+        for (int col = 1; col <= _Worksheet.Dimension.End.Column; col++)
         {
-            string? header = _wsWorksheet.Cells[1, col].GetValue<string>()?.Trim();
+            string? header = _Worksheet.Cells[1, col].GetValue<string>()?.Trim();
             if (!string.IsNullOrWhiteSpace(header))
                 headers[header] = col;
         }
@@ -170,19 +170,19 @@ public class PlanningDataProvider
         if (totalHoursCol <= 0)
             return result;
 
-        for (int row = 2; row <= _wsWorksheet.Dimension.End.Row; row++)
+        for (int row = 2; row <= _Worksheet.Dimension.End.Row; row++)
         {
-            string? epicName = _wsWorksheet.Cells[row, epicCol].GetValue<string>()?.Trim();
+            string? epicName = _Worksheet.Cells[row, epicCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(epicName))
                 continue;
 
-            if (!TryReadSprintNumber(_wsWorksheet.Cells[row, sprintCol].Value, out int sprintNumber) ||
+            if (!TryReadSprintNumber(_Worksheet.Cells[row, sprintCol].Value, out int sprintNumber) ||
                 sprintNumber != _iInitialSprintNumber)
             {
                 continue;
             }
 
-            double totalHours = ReadNumericValue(_wsWorksheet.Cells[row, totalHoursCol].Value);
+            double totalHours = ReadNumericValue(_Worksheet.Cells[row, totalHoursCol].Value);
             if (totalHours < 0)
                 totalHours = 0;
 
@@ -194,9 +194,9 @@ public class PlanningDataProvider
 
         return result;
 
-        static bool TryReadSprintNumber(object? _objValue, out int _iSprintNumber)
+        static bool TryReadSprintNumber(object? _Value, out int _iSprintNumber)
         {
-            switch (_objValue)
+            switch (_Value)
             {
                 case int i:
                     _iSprintNumber = i;
@@ -219,9 +219,9 @@ public class PlanningDataProvider
             }
         }
 
-        static double ReadNumericValue(object? _objValue)
+        static double ReadNumericValue(object? _Value)
         {
-            return _objValue switch
+            return _Value switch
             {
                 null => 0.0,
                 double d => d,
@@ -235,14 +235,14 @@ public class PlanningDataProvider
         }
     }
 
-    private Dictionary<string, ResourceCapacity> LoadResources(ExcelWorksheet _wsResourceWorksheet)
+    private Dictionary<string, ResourceCapacity> LoadResources(ExcelWorksheet _ResourceWorksheet)
     {
-        int rows = _wsResourceWorksheet.Dimension.End.Row;
+        int rows = _ResourceWorksheet.Dimension.End.Row;
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-        for (int c = 1; c <= _wsResourceWorksheet.Dimension.End.Column; c++)
+        for (int c = 1; c <= _ResourceWorksheet.Dimension.End.Column; c++)
         {
-            var h = _wsResourceWorksheet.Cells[2, c].GetValue<string>()?.Trim();
+            var h = _ResourceWorksheet.Cells[2, c].GetValue<string>()?.Trim();
             if (!string.IsNullOrWhiteSpace(h)) headers[h] = c;
         }
 
@@ -256,12 +256,12 @@ public class PlanningDataProvider
         var dict = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
         for (int row = 3; row <= rows; row++)
         {
-            string name = _wsResourceWorksheet.Cells[row, nameCol].GetValue<string>()?.Trim();
+            string name = _ResourceWorksheet.Cells[row, nameCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(name)) continue;
 
-            double dev = _wsResourceWorksheet.Cells[row, devCol].GetValue<double>();
-            double maint = maintCol > 0 ? _wsResourceWorksheet.Cells[row, maintCol].GetValue<double>() : 0;
-            double anal = analCol > 0 ? _wsResourceWorksheet.Cells[row, analCol].GetValue<double>() : 0;
+            double dev = _ResourceWorksheet.Cells[row, devCol].GetValue<double>();
+            double maint = maintCol > 0 ? _ResourceWorksheet.Cells[row, maintCol].GetValue<double>() : 0;
+            double anal = analCol > 0 ? _ResourceWorksheet.Cells[row, analCol].GetValue<double>() : 0;
 
             dict[name] = new ResourceCapacity
             {
@@ -274,9 +274,9 @@ public class PlanningDataProvider
     }
 
     private Dictionary<int, Dictionary<string, ResourceCapacity>> AdjustCapacitiesForAbsences(
-        Dictionary<string, ResourceCapacity> _dicstrBaseCapacities,
-        Dictionary<string, List<(DateTime, DateTime)>> _dicstrAbsencesPerResource,
-        IEnumerable<DateTime> _enuHolidays)
+        Dictionary<string, ResourceCapacity> _BaseCapacities,
+        Dictionary<string, List<(DateTime, DateTime)>> _AbsencesPerResource,
+        IEnumerable<DateTime> _Holidays)
     {
         Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = new();
         for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
@@ -284,21 +284,21 @@ public class PlanningDataProvider
             var sprintStart = m_InitialSprintStart.AddDays(sprint * m_iSprintDays).Date;
             var sprintEnd = sprintStart.AddDays(m_iSprintDays - 1).Date;
 
-            int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, _enuHolidays);
+            int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, _Holidays);
 
             var sprintCapacities = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var user in _dicstrBaseCapacities.Keys)
+            foreach (var user in _BaseCapacities.Keys)
             {
-                ResourceCapacity userSprintCapacity = new(_dicstrBaseCapacities[user]);
+                ResourceCapacity userSprintCapacity = new(_BaseCapacities[user]);
                 double scale = (double)workingDaysInSprint / m_iSprintCapacityDays;
                 userSprintCapacity.AdapteCapacityToScale(scale);
 
-                if (_dicstrAbsencesPerResource.TryGetValue(user, out var absList))
+                if (_AbsencesPerResource.TryGetValue(user, out var absList))
                 {
                     foreach (var (start, end) in absList)
                     {
-                        int absentWorkingDays = BusinessCalendar.CountWorkingDaysOverlap(start, end, sprintStart, sprintEnd, _enuHolidays);
+                        int absentWorkingDays = BusinessCalendar.CountWorkingDaysOverlap(start, end, sprintStart, sprintEnd, _Holidays);
                         if (absentWorkingDays > 0 && workingDaysInSprint > 0)
                         {
                             userSprintCapacity.AdaptCapacityToAbsences(workingDaysInSprint, absentWorkingDays);
@@ -314,12 +314,12 @@ public class PlanningDataProvider
         return adjustedCapacities;
     }
 
-    private List<Epic> LoadEpics(ExcelWorksheet _wsEpicWorksheet, List<string> _lststrResourceNames)
+    private List<Epic> LoadEpics(ExcelWorksheet _EpicWorksheet, List<string> _ResourceNames)
     {
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (int c = 1; c <= _wsEpicWorksheet.Dimension.End.Column; c++)
+        for (int c = 1; c <= _EpicWorksheet.Dimension.End.Column; c++)
         {
-            var h = _wsEpicWorksheet.Cells[1, c].GetValue<string>()?.Trim();
+            var h = _EpicWorksheet.Cells[1, c].GetValue<string>()?.Trim();
             if (!string.IsNullOrWhiteSpace(h)) headers[h] = c;
         }
 
@@ -335,29 +335,29 @@ public class PlanningDataProvider
             || kv.Key.Contains("Dependency", StringComparison.OrdinalIgnoreCase)).Value;
         int endAnalysisCol = headers.FirstOrDefault(kv => kv.Key.Contains("End of analysis", StringComparison.OrdinalIgnoreCase)).Value;
 
-        int rows = _wsEpicWorksheet.Dimension.End.Row;
+        int rows = _EpicWorksheet.Dimension.End.Row;
         var epics = new List<Epic>();
 
         for (int row = 2; row <= rows; row++)
         {
-            string epicName = _wsEpicWorksheet.Cells[row, epicCol].GetValue<string>()?.Trim();
+            string epicName = _EpicWorksheet.Cells[row, epicCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(epicName)) continue;
 
-            string state = _wsEpicWorksheet.Cells[row, stateCol].GetValue<string>() ?? string.Empty;
+            string state = _EpicWorksheet.Cells[row, stateCol].GetValue<string>() ?? string.Empty;
             double charge = 0.0;
-            double remVal = remainingCol > 0 ? _wsEpicWorksheet.Cells[row, remainingCol].GetValue<double>() : 0.0;
-            double roughVal = roughCol > 0 ? _wsEpicWorksheet.Cells[row, roughCol].GetValue<double>() : 0.0;
+            double remVal = remainingCol > 0 ? _EpicWorksheet.Cells[row, remainingCol].GetValue<double>() : 0.0;
+            double roughVal = roughCol > 0 ? _EpicWorksheet.Cells[row, roughCol].GetValue<double>() : 0.0;
 
             if (remVal > 0)
                 charge = remVal;
             else if (roughVal > 0)
                 charge = roughVal;
 
-            string assigned = assignedCol > 0 ? (_wsEpicWorksheet.Cells[row, assignedCol].GetValue<string>() ?? string.Empty) : string.Empty;
-            string willAssign = willAssignCol > 0 ? (_wsEpicWorksheet.Cells[row, willAssignCol].GetValue<string>() ?? string.Empty) : string.Empty;
-            string depRaw = depCol > 0 ? (_wsEpicWorksheet.Cells[row, depCol].GetValue<string>() ?? string.Empty) : string.Empty;
-            string endAnalysisStr = endAnalysisCol > 0 ? (_wsEpicWorksheet.Cells[row, endAnalysisCol].GetValue<string>() ?? string.Empty) : string.Empty;
-            string priorityStr = priorityCol > 0 ? (_wsEpicWorksheet.Cells[row, priorityCol].Text?.Trim() ?? "Normal") : "Normal";
+            string assigned = assignedCol > 0 ? (_EpicWorksheet.Cells[row, assignedCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string willAssign = willAssignCol > 0 ? (_EpicWorksheet.Cells[row, willAssignCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string depRaw = depCol > 0 ? (_EpicWorksheet.Cells[row, depCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string endAnalysisStr = endAnalysisCol > 0 ? (_EpicWorksheet.Cells[row, endAnalysisCol].GetValue<string>() ?? string.Empty) : string.Empty;
+            string priorityStr = priorityCol > 0 ? (_EpicWorksheet.Cells[row, priorityCol].Text?.Trim() ?? "Normal") : "Normal";
             EpicPriority priority = priorityStr.ToLower() switch
             {
                 "urgent" => EpicPriority.Urgent,
@@ -372,7 +372,7 @@ public class PlanningDataProvider
             {
                 Priority = priority
             };
-            epic.ParseAssignments(assigned, willAssign, _lststrResourceNames);
+            epic.ParseAssignments(assigned, willAssign, _ResourceNames);
             epic.ParseDependencies(depRaw);
 
             if (epic.Charge <= 0)
