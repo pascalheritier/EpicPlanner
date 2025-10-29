@@ -815,14 +815,20 @@ public class Simulator
             float width = rect.Width;
             float height = rect.Height;
 
-            for (float offset = -height; offset < width; offset += spacing)
+            canvas.Save();
+            canvas.ClipRect(rect);
+
+            float maxOffset = width + height;
+            for (float offset = -height; offset <= maxOffset; offset += spacing)
             {
-                float startX = rect.Left + MathF.Max(0f, offset);
-                float startY = rect.Top + MathF.Max(0f, -offset);
-                float endX = rect.Left + MathF.Min(width, offset + height);
-                float endY = rect.Top + MathF.Min(height, height + offset);
+                float startX = rect.Left + offset;
+                float startY = rect.Top;
+                float endX = startX - height;
+                float endY = rect.Bottom;
                 canvas.DrawLine(startX, startY, endX, endY, hatchPaint);
             }
+
+            canvas.Restore();
         }
 
         // Bars and left labels
