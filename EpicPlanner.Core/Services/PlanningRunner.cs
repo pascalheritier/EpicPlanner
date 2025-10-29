@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace EpicPlanner.Core;
 
 public class PlanningRunner
@@ -26,37 +30,108 @@ public class PlanningRunner
         bool includePlannedHours = _Mode == PlanningMode.Standard;
 
         PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: includePlannedHours);
-        Simulator simulator = snapshot.CreateSimulator(_Mode == PlanningMode.Analysis ? IsAnalysisEpic : null);
-        simulator.Run();
 
-        if (_Mode == PlanningMode.Standard)
+        if (_Mode == PlanningMode.Analysis)
         {
-            simulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
+            HashSet<string> analysisScope = BuildAnalysisScope(snapshot.Epics);
+            Simulator simulator = snapshot.CreateSimulator(epic => analysisScope.Contains(epic.Name));
+            simulator.Run();
+            AlignAnalysisEpicsToEndDates(simulator.Epics);
+
+            simulator.ExportGanttSprintBased(
+                m_AppConfiguration.FileConfiguration.OutputPngFilePath,
+                PlanningMode.Analysis);
+            return;
         }
 
-        simulator.ExportGanttSprintBased(m_AppConfiguration.FileConfiguration.OutputPngFilePath);
+        Simulator standardSimulator = snapshot.CreateSimulator();
+        standardSimulator.Run();
+        standardSimulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
+        standardSimulator.ExportGanttSprintBased(
+            m_AppConfiguration.FileConfiguration.OutputPngFilePath,
+            PlanningMode.Standard);
     }
 
     #endregion
 
     #region Helpers
 
-    private static bool IsAnalysisEpic(Epic _Epic)
+    private static HashSet<string> BuildAnalysisScope(IReadOnlyList<Epic> _Epics)
     {
-        if (_Epic is null)
+        Dictionary<string, Epic> byName = _Epics
+            .GroupBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToDictionary(e => e.Name, StringComparer.OrdinalIgnoreCase);
+
+        HashSet<string> included = new(StringComparer.OrdinalIgnoreCase);
+        Queue<Epic> queue = new();
+
+        foreach (Epic epic in byName.Values)
         {
-            return false;
+            if (IsAnalysisState(epic))
+            {
+                queue.Enqueue(epic);
+            }
         }
 
-        string? state = _Epic.State;
-
-        if (string.IsNullOrWhiteSpace(state))
+        while (queue.Count > 0)
         {
-            return false;
+            Epic current = queue.Dequeue();
+            if (!included.Add(current.Name))
+            {
+                continue;
+            }
+
+            foreach (string dependencyName in current.Dependencies)
+            {
+                if (!byName.TryGetValue(dependencyName, out Epic? dependency))
+                {
+                    continue;
+                }
+
+                if (!included.Contains(dependency.Name) &&
+                    (IsAnalysisState(dependency) || IsDevelopmentState(dependency)))
+                {
+                    queue.Enqueue(dependency);
+                }
+            }
         }
 
-        return state.Contains("analysis", StringComparison.OrdinalIgnoreCase);
+        return included;
     }
+
+    private static void AlignAnalysisEpicsToEndDates(IReadOnlyList<Epic> _Epics)
+    {
+        foreach (Epic epic in _Epics)
+        {
+            if (!IsAnalysisState(epic))
+            {
+                continue;
+            }
+
+            if (epic.EndAnalysis.HasValue)
+            {
+                DateTime end = epic.EndAnalysis.Value.Date;
+                epic.StartDate = end;
+                epic.EndDate = end;
+            }
+            else
+            {
+                epic.StartDate = null;
+                epic.EndDate = null;
+            }
+        }
+    }
+
+    private static bool IsAnalysisState(Epic _Epic) =>
+        _Epic != null &&
+        !string.IsNullOrWhiteSpace(_Epic.State) &&
+        _Epic.State.Contains("analysis", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDevelopmentState(Epic _Epic) =>
+        _Epic != null &&
+        !string.IsNullOrWhiteSpace(_Epic.State) &&
+        _Epic.State.Contains("develop", StringComparison.OrdinalIgnoreCase);
 
     #endregion
 }

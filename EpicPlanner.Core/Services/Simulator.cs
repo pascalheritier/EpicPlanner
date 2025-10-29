@@ -1,6 +1,7 @@
 using OfficeOpenXml;
 using SkiaSharp;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -57,6 +58,12 @@ public class Simulator
         foreach (var e in _Epics.Where(e => e.Remaining <= 0))
             m_CompletedMap[e.Name] = e.EndDate ?? _InitialSprintDate.AddDays(-1);
     }
+
+    #endregion
+
+    #region Properties
+
+    public IReadOnlyList<Epic> Epics => m_Epics;
 
     #endregion
 
@@ -674,7 +681,7 @@ public class Simulator
         epicSheet.Cells.AutoFitColumns();
     }
 
-    public void ExportGanttSprintBased(string _strOutputPngPath)
+    public void ExportGanttSprintBased(string _strOutputPngPath, PlanningMode _Mode)
     {
         // Build ranges per epic from allocations
         var ranges = m_Epics
@@ -747,7 +754,10 @@ public class Simulator
         SKColor BAR_BORDER = new SKColor(0, 0, 0, 0); // no border as requested
 
         // Title
-        canvas.DrawText("Gantt - Sprints", leftLabelPad, 30, titlePaint);
+        string title = _Mode == PlanningMode.Analysis
+            ? "Gantt - Sprints (Analysis duration)"
+            : "Gantt - Sprints (Realisation duration)";
+        canvas.DrawText(title, leftLabelPad, 30, titlePaint);
 
         // Determine sprint range
         int maxSprint = ranges.Count > 0 ? ranges.Max(r => r.SprintEnd) + 1 : 1;

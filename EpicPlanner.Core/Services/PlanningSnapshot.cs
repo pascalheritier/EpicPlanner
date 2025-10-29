@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace EpicPlanner.Core;
@@ -44,6 +45,12 @@ public class PlanningSnapshot
             ? new Dictionary<string, double>(_PlannedCapacityByEpic, StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
     }
+
+    #endregion
+
+    #region Properties
+
+    public IReadOnlyList<Epic> Epics => m_Epics;
 
     #endregion
 
