@@ -463,32 +463,12 @@ public class RedmineDataFetcher
 
         foreach (var group in groupedById)
         {
-            HashSet<int> countedIssueIds = new();
-
             List<Issue> parentIssues = await FetchEpicParentIssuesAsync(group.Key).ConfigureAwait(false);
             double total = 0.0;
 
             if (parentIssues.Count > 0)
             {
-                (double fromChildren, HashSet<int> childIds) = await SumRemainingFromTodoChildrenAsync(parentIssues).ConfigureAwait(false);
-                total += fromChildren;
-                countedIssueIds = childIds;
-            }
-
-            IEnumerable<Issue> directTodos = await FetchTodoIssuesForEpicAsync(group.Key).ConfigureAwait(false);
-            foreach (Issue todo in directTodos)
-            {
-                if (todo == null)
-                    continue;
-
-                if (todo.Subject.Contains("[Suivi]") || todo.Subject.Contains("[Analyse]"))
-                    continue;
-
-                int id = todo.Id;
-                if (id > 0 && !countedIssueIds.Add(id))
-                    continue;
-
-                total += ExtractRemaining(todo);
+                total += await SumRemainingFromTodoChildrenAsync(parentIssues).ConfigureAwait(false);
             }
 
             foreach (EpicDescriptor descriptor in group)
@@ -522,50 +502,61 @@ public class RedmineDataFetcher
         return parents.Values.ToList();
     }
 
-    private async Task<(double Total, HashSet<int> CountedIssueIds)> SumRemainingFromTodoChildrenAsync(IEnumerable<Issue> _ParentIssues)
+    private async Task<double> SumRemainingFromTodoChildrenAsync(IEnumerable<Issue> _ParentIssues)
     {
         double total = 0.0;
         HashSet<int> counted = new();
+        HashSet<int> visitedParents = new();
+        Queue<int> parentsToVisit = new();
 
         foreach (Issue parent in _ParentIssues)
         {
+            if (parent == null)
+                continue;
+
+            int parentId = parent.Id;
+            if (parentId <= 0 || !visitedParents.Add(parentId))
+                continue;
+
+            parentsToVisit.Enqueue(parentId);
+        }
+
+        while (parentsToVisit.Count > 0)
+        {
+            int currentParentId = parentsToVisit.Dequeue();
+
             var parameters = new NameValueCollection
             {
-                { RedmineKeys.TRACKER_ID, "6" },
-                { ParentIdKey, parent.Id.ToString(CultureInfo.InvariantCulture) },
+                { ParentIdKey, currentParentId.ToString(CultureInfo.InvariantCulture) },
                 { RedmineKeys.STATUS_ID, "*" }
             };
 
-            IEnumerable<Issue> todoChildren = await GetIssuesAsync(parameters).ConfigureAwait(false);
-            foreach (Issue child in todoChildren)
+            IEnumerable<Issue> children = await GetIssuesAsync(parameters).ConfigureAwait(false);
+            foreach (Issue child in children)
             {
+                if (child == null)
+                    continue;
+
                 if (child.Subject.Contains("[Suivi]") || child.Subject.Contains("[Analyse]"))
                     continue;
 
-                int id = child.Id;
-                if (id > 0)
+                int childId = child.Id;
+
+                if (child.Tracker?.Id == 6)
                 {
-                    if (!counted.Add(id))
+                    if (childId > 0 && !counted.Add(childId))
                         continue;
+
+                    total += ExtractRemaining(child);
+                    continue;
                 }
 
-                total += ExtractRemaining(child);
+                if (childId > 0 && visitedParents.Add(childId))
+                    parentsToVisit.Enqueue(childId);
             }
         }
 
-        return (total, counted);
-    }
-
-    private async Task<IEnumerable<Issue>> FetchTodoIssuesForEpicAsync(int _iEnumerationId)
-    {
-        var parameters = new NameValueCollection
-        {
-            { RedmineKeys.TRACKER_ID, "6" },
-            { RedmineKeys.STATUS_ID, "*" },
-            { $"cf_{EpicCustomFieldId}", _iEnumerationId.ToString(CultureInfo.InvariantCulture) }
-        };
-
-        return await GetIssuesAsync(parameters).ConfigureAwait(false);
+        return total;
     }
 
     private static double ExtractRemaining(Issue _Issue)
