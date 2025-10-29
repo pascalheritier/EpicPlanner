@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
 namespace EpicPlanner.Core;
 
 public class PlanningSnapshot
@@ -44,12 +48,22 @@ public class PlanningSnapshot
 
     #endregion
 
+    #region Properties
+
+    public IReadOnlyList<Epic> Epics => m_Epics;
+
+    #endregion
+
     #region Create Simulator
 
-    public Simulator CreateSimulator()
+    public Simulator CreateSimulator(Func<Epic, bool>? _Filter = null)
     {
+        List<Epic> epics = _Filter is null
+            ? m_Epics
+            : m_Epics.Where(_Filter).ToList();
+
         return new Simulator(
-            m_Epics,
+            epics,
             m_SprintCapacities,
             m_InitialSprintStart,
             m_iSprintDays,

@@ -1,6 +1,7 @@
 using OfficeOpenXml;
 using SkiaSharp;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -57,6 +58,15 @@ public class Simulator
         foreach (var e in _Epics.Where(e => e.Remaining <= 0))
             m_CompletedMap[e.Name] = e.EndDate ?? _InitialSprintDate.AddDays(-1);
     }
+
+    #endregion
+
+    #region Properties
+
+    public IReadOnlyList<Epic> Epics => m_Epics;
+    public DateTime InitialSprintDate => m_InitialSprintDate;
+    public int SprintLengthDays => m_iSprintDays;
+    public int MaxSprintCount => m_iMaxSprintCount;
 
     #endregion
 
@@ -674,19 +684,20 @@ public class Simulator
         epicSheet.Cells.AutoFitColumns();
     }
 
-    public void ExportGanttSprintBased(string _strOutputPngPath)
+    public void ExportGanttSprintBased(string _strOutputPngPath, PlanningMode _enumMode)
     {
         // Build ranges per epic from allocations
         var ranges = m_Epics
             .Where(e => e.StartDate.HasValue && e.EndDate.HasValue)
             .Select(e =>
             {
-                int s0 = SprintIndex(e.StartDate.Value);
-                int s1 = SprintIndex(e.EndDate.Value);
+                float startPosition = SprintPosition(e.StartDate.Value, _bIsEnd: false);
+                float endPosition = SprintPosition(e.EndDate.Value, _bIsEnd: true);
                 var key = ExtractEpicKey(e.Name);
-                return new { e.Name, e.State, SprintStart = s0, SprintEnd = s1, Key = key };
+                bool hatched = !e.EndAnalysis.HasValue && e.State.Contains("analysis", StringComparison.OrdinalIgnoreCase);
+                return new { e.Name, e.State, StartPosition = startPosition, EndPosition = endPosition, Key = key, Hatched = hatched };
             })
-            .OrderBy(r => r.SprintStart)
+            .OrderBy(r => r.StartPosition)
             .ThenBy(r => r.Key.Year).ThenBy(r => r.Key.Num)
             .ToList();
 
@@ -747,10 +758,14 @@ public class Simulator
         SKColor BAR_BORDER = new SKColor(0, 0, 0, 0); // no border as requested
 
         // Title
-        canvas.DrawText("Gantt - Sprints", leftLabelPad, 30, titlePaint);
+        string title = _enumMode == PlanningMode.Analysis
+            ? "Gantt - Sprints (Analysis duration)"
+            : "Gantt - Sprints (Realisation duration)";
+        canvas.DrawText(title, leftLabelPad, 30, titlePaint);
 
         // Determine sprint range
-        int maxSprint = ranges.Count > 0 ? ranges.Max(r => r.SprintEnd) + 1 : 1;
+        float maxPosition = ranges.Count > 0 ? ranges.Max(r => r.EndPosition) : 0f;
+        int maxSprint = Math.Max(1, (int)Math.Ceiling(maxPosition));
 
         // Plot area
         var plotLeft = leftLabelPad;
@@ -778,14 +793,52 @@ public class Simulator
             canvas.DrawLine(x, plotTop, x, plotBottom, gridPaintV);
         }
 
+        void DrawHatchedRect(SKRect rect, SKColor baseColor)
+        {
+            SKColor fillColor = new(baseColor.Red, baseColor.Green, baseColor.Blue, 160);
+            SKColor lineColor = new(baseColor.Red, baseColor.Green, baseColor.Blue, 220);
+
+            using (var fillPaint = new SKPaint { Color = fillColor, IsAntialias = true, Style = SKPaintStyle.Fill })
+            {
+                canvas.DrawRect(rect, fillPaint);
+            }
+
+            using var hatchPaint = new SKPaint
+            {
+                Color = lineColor,
+                IsAntialias = true,
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = 1.5f
+            };
+
+            float spacing = 6f;
+            float width = rect.Width;
+            float height = rect.Height;
+
+            canvas.Save();
+            canvas.ClipRect(rect);
+
+            float maxOffset = width + height;
+            for (float offset = -height; offset <= maxOffset; offset += spacing)
+            {
+                float startX = rect.Left + offset;
+                float startY = rect.Top;
+                float endX = startX - height;
+                float endY = rect.Bottom;
+                canvas.DrawLine(startX, startY, endX, endY, hatchPaint);
+            }
+
+            canvas.Restore();
+        }
+
         // Bars and left labels
         for (int i = 0; i < ranges.Count; i++)
         {
             var r = ranges[i];
             int rowYIndex = i;
             float cy = plotTop + rowYIndex * rowHeight + rowHeight * 0.5f;
-            float xs = plotLeft + r.SprintStart * xStep;
-            float xe = plotLeft + (r.SprintEnd + 1) * xStep; // inclusive end
+            float xs = plotLeft + r.StartPosition * xStep;
+            float xe = plotLeft + r.EndPosition * xStep;
             float barH = Math.Min(18f, rowHeight - 6f);
 
             SKColor fill = r.State.Contains("pending") && r.State.Contains("analysis") ? BORDEAUX :
@@ -794,9 +847,16 @@ public class Simulator
                            r.State.Contains("develop") && !r.State.Contains("pending") ? LIGHT_GREEN :
                            SKColors.LightGray;
 
-            using var barPaint = new SKPaint { Color = fill, IsAntialias = true, Style = SKPaintStyle.Fill };
             var rect = new SKRect(xs, cy - barH / 2f, xe, cy + barH / 2f);
-            canvas.DrawRect(rect, barPaint);
+            if (r.Hatched)
+            {
+                DrawHatchedRect(rect, fill);
+            }
+            else
+            {
+                using var barPaint = new SKPaint { Color = fill, IsAntialias = true, Style = SKPaintStyle.Fill };
+                canvas.DrawRect(rect, barPaint);
+            }
 
             // Epic label to the left (outside)
             labelPaint.TextAlign = SKTextAlign.Right;
@@ -831,19 +891,35 @@ public class Simulator
         float lgY = topTitlePad + 20;
         float box = 16f;
 
-        var legendItems = new List<(string Label, SKColor Color)>
-            {
-                ("In Development", LIGHT_GREEN),
-                ("In Analysis", MAUVE),
-                ("Pending Analysis", BORDEAUX),
-                ("Pending Development", LIGHT_BLUE)
-            };
+        List<(string Label, SKColor Color, bool Hatched)> legendItems =
+            _enumMode == PlanningMode.Analysis
+                ? new List<(string Label, SKColor Color, bool Hatched)>
+                {
+                    ("In Analysis", MAUVE, false),
+                    ("Pending Analysis", BORDEAUX, false),
+                    ("Analysis (no end date)", MAUVE, true)
+                }
+                : new List<(string Label, SKColor Color, bool Hatched)>
+                {
+                    ("In Development", LIGHT_GREEN, false),
+                    ("In Analysis", MAUVE, false),
+                    ("Pending Analysis", BORDEAUX, false),
+                    ("Pending Development", LIGHT_BLUE, false),
+                    ("Analysis (no end date)", MAUVE, true)
+                };
 
         foreach (var item in legendItems)
         {
-            using var paint = new SKPaint { Color = item.Color, IsAntialias = true, Style = SKPaintStyle.Fill };
             var rect = new SKRect(lgX, lgY, lgX + box, lgY + box);
-            canvas.DrawRect(rect, paint);
+            if (item.Hatched)
+            {
+                DrawHatchedRect(rect, item.Color);
+            }
+            else
+            {
+                using var paint = new SKPaint { Color = item.Color, IsAntialias = true, Style = SKPaintStyle.Fill };
+                canvas.DrawRect(rect, paint);
+            }
 
             labelPaint.TextAlign = SKTextAlign.Left;
             canvas.DrawText(item.Label, lgX + box + 10, lgY + box - 3, labelPaint);
@@ -878,7 +954,24 @@ public class Simulator
         return (9999, 9999);
     }
 
-    private int SprintIndex(DateTime _SprintDate) => (int)((_SprintDate.Date - m_InitialSprintDate.Date).TotalDays / m_iSprintDays);
+    private int SprintIndex(DateTime _DateSprint) => (int)((_DateSprint.Date - m_InitialSprintDate.Date).TotalDays / m_iSprintDays);
+
+    private float SprintPosition(DateTime _Date, bool _bIsEnd)
+    {
+        int iSprintDays = m_iSprintDays <= 0 ? 1 : m_iSprintDays;
+        double dTotalDays = (_Date.Date - m_InitialSprintDate.Date).TotalDays;
+        if (dTotalDays < 0)
+        {
+            dTotalDays = 0;
+        }
+
+        if (_bIsEnd)
+        {
+            dTotalDays += 1.0;
+        }
+
+        return (float)(dTotalDays / iSprintDays);
+    }
 
     private DateTime SprintStartDate(int _iSprintIndex) => m_InitialSprintDate.AddDays(_iSprintIndex * m_iSprintDays);
 
