@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Globalization;
 using System.IO;
@@ -141,8 +142,6 @@ public class RedmineDataFetcher
         List<Issue> sprintIssues = (await GetSprintIssuesAsync(_iSprintNumber)).ToList();
 
         var parentCache = new Dictionary<int, Issue>();
-        var issueCache = new Dictionary<int, Issue>();
-
         foreach (var issue in sprintIssues)
         {
             if (issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
@@ -152,9 +151,6 @@ public class RedmineDataFetcher
 
             if (plannedEpicSet != null && !plannedEpicSet.Contains(descriptor.Name))
                 continue;
-
-            if (issue.Id > 0)
-                issueCache[issue.Id] = issue;
 
             if (!descriptors.TryGetValue(descriptor.Name, out EpicDescriptor? existing) ||
                 (!existing.HasEnumeration && descriptor.HasEnumeration))
@@ -182,6 +178,50 @@ public class RedmineDataFetcher
             }
         }
 
+        if (plannedEpicSet != null && plannedEpicSet.Count > 0)
+        {
+            Dictionary<int, string> enumerationLookup = await GetEpicEnumerationLookupAsync().ConfigureAwait(false);
+            var nameToEnumerationId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in enumerationLookup)
+            {
+                string? normalizedName = NormalizeEpicName(kvp.Value);
+                if (string.IsNullOrWhiteSpace(normalizedName))
+                    continue;
+
+                if (!nameToEnumerationId.ContainsKey(normalizedName))
+                    nameToEnumerationId[normalizedName] = kvp.Key;
+            }
+
+            foreach (string plannedEpic in plannedEpicSet)
+            {
+                if (!descriptors.ContainsKey(plannedEpic))
+                {
+                    int? enumerationId = null;
+                    if (nameToEnumerationId.TryGetValue(plannedEpic, out int resolvedId))
+                        enumerationId = resolvedId;
+
+                    descriptors[plannedEpic] = new EpicDescriptor(plannedEpic, enumerationId);
+                }
+
+                if (!summaries.ContainsKey(plannedEpic))
+                    summaries[plannedEpic] = new SprintEpicSummary { Epic = plannedEpic };
+            }
+        }
+
+        Dictionary<string, EpicTodoCache> todoCaches = await BuildEpicTodoCachesAsync(descriptors.Values).ConfigureAwait(false);
+        var todoIssueToEpic = new Dictionary<int, string>();
+
+        foreach (var cacheEntry in todoCaches)
+        {
+            foreach (int issueId in cacheEntry.Value.TodoIssueIds)
+            {
+                if (issueId > 0)
+                {
+                    todoIssueToEpic[issueId] = cacheEntry.Key;
+                }
+            }
+        }
+
         List<TimeEntryRecord> timeEntries = await GetTimeEntriesAsync(_SprintStart, _SprintEnd).ConfigureAwait(false);
         HashSet<string> plannedEpicNames = plannedEpicSet != null
             ? new HashSet<string>(plannedEpicSet, StringComparer.OrdinalIgnoreCase)
@@ -196,23 +236,14 @@ public class RedmineDataFetcher
             if (issueId <= 0)
                 continue;
 
-            Issue? issue = await GetIssueFromCacheAsync(issueId).ConfigureAwait(false);
-            if (issue == null)
+            if (!todoIssueToEpic.TryGetValue(issueId, out string? epicName))
                 continue;
 
-            if (issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
+            if (!plannedEpicNames.Contains(epicName))
                 continue;
 
-            EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(issue, parentCache).ConfigureAwait(false);
-
-            if (!plannedEpicNames.Contains(descriptor.Name))
+            if (!descriptors.TryGetValue(epicName, out EpicDescriptor? descriptor))
                 continue;
-
-            if (!descriptors.TryGetValue(descriptor.Name, out EpicDescriptor? existingDescriptor) ||
-                (!existingDescriptor.HasEnumeration && descriptor.HasEnumeration))
-            {
-                descriptors[descriptor.Name] = descriptor;
-            }
 
             if (!summaries.TryGetValue(descriptor.Name, out var summary))
             {
@@ -222,8 +253,6 @@ public class RedmineDataFetcher
 
             summary.Consumed += entry.Hours;
         }
-
-        Dictionary<string, double> totalRemaining = await GetTotalRemainingForEpicsAsync(descriptors.Values).ConfigureAwait(false);
 
         if (hasSheetPlannedCapacity)
         {
@@ -238,9 +267,9 @@ public class RedmineDataFetcher
 
         foreach (var summary in summaries.Values)
         {
-            if (totalRemaining.TryGetValue(summary.Epic, out double total))
+            if (todoCaches.TryGetValue(summary.Epic, out EpicTodoCache? cache))
             {
-                summary.Remaining = total;
+                summary.Remaining = cache.TotalRemaining;
             }
             else if (sprintRemaining.TryGetValue(summary.Epic, out double sprintTotal))
             {
@@ -252,21 +281,29 @@ public class RedmineDataFetcher
             }
         }
 
+        int plannedEpicCount = _PlannedEpics?.Count ?? 0;
+
+        if (plannedEpicSet != null && plannedEpicCount > 0)
+        {
+            var orderedSummaries = new List<SprintEpicSummary>(plannedEpicCount);
+            foreach (string plannedEpic in _PlannedEpics!)
+            {
+                if (summaries.TryGetValue(plannedEpic, out SprintEpicSummary? existing))
+                {
+                    orderedSummaries.Add(existing);
+                }
+                else
+                {
+                    orderedSummaries.Add(new SprintEpicSummary { Epic = plannedEpic });
+                }
+            }
+
+            return orderedSummaries;
+        }
+
         return summaries.Values
             .OrderBy(s => s.Epic, StringComparer.OrdinalIgnoreCase)
             .ToList();
-
-        async Task<Issue?> GetIssueFromCacheAsync(int _IssueId)
-        {
-            if (issueCache.TryGetValue(_IssueId, out Issue? cachedIssue))
-                return cachedIssue;
-
-            Issue? fetchedIssue = await GetIssueByIdAsync(_IssueId).ConfigureAwait(false);
-            if (fetchedIssue != null)
-                issueCache[_IssueId] = fetchedIssue;
-
-            return fetchedIssue;
-        }
     }
 
     private async Task<IEnumerable<Issue>> GetSprintIssuesAsync(int _iSprintNumber)
@@ -453,9 +490,9 @@ public class RedmineDataFetcher
         return new EpicDescriptor(name, _Value.EnumerationId);
     }
 
-    private async Task<Dictionary<string, double>> GetTotalRemainingForEpicsAsync(IEnumerable<EpicDescriptor> _Descriptors)
+    private async Task<Dictionary<string, EpicTodoCache>> BuildEpicTodoCachesAsync(IEnumerable<EpicDescriptor> _Descriptors)
     {
-        var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var caches = new Dictionary<string, EpicTodoCache>(StringComparer.OrdinalIgnoreCase);
 
         var groupedById = _Descriptors
             .Where(d => d.HasEnumeration)
@@ -464,17 +501,38 @@ public class RedmineDataFetcher
         foreach (var group in groupedById)
         {
             List<Issue> parentIssues = await FetchEpicParentIssuesAsync(group.Key).ConfigureAwait(false);
-            double total = parentIssues.Count > 0
-                ? await SumRemainingFromTodoChildrenAsync(parentIssues).ConfigureAwait(false)
-                : 0.0;
+            if (parentIssues.Count == 0)
+            {
+                foreach (EpicDescriptor descriptor in group)
+                {
+                    caches[descriptor.Name] = EpicTodoCache.Empty;
+                }
+
+                continue;
+            }
+
+            List<Issue> todoIssues = await FetchTodoDescendantsAsync(parentIssues).ConfigureAwait(false);
+
+            double totalRemaining = 0.0;
+            HashSet<int> todoIssueIds = new();
+
+            foreach (Issue todo in todoIssues)
+            {
+                if (todo?.Id > 0)
+                    todoIssueIds.Add(todo.Id);
+
+                totalRemaining += ExtractRemaining(todo);
+            }
+
+            var cache = new EpicTodoCache(todoIssueIds, totalRemaining);
 
             foreach (EpicDescriptor descriptor in group)
             {
-                result[descriptor.Name] = total;
+                caches[descriptor.Name] = cache;
             }
         }
 
-        return result;
+        return caches;
     }
 
     private async Task<List<Issue>> FetchEpicParentIssuesAsync(int _iEnumerationId)
@@ -499,30 +557,58 @@ public class RedmineDataFetcher
         return parents.Values.ToList();
     }
 
-    private async Task<double> SumRemainingFromTodoChildrenAsync(IEnumerable<Issue> _ParentIssues)
+    private async Task<List<Issue>> FetchTodoDescendantsAsync(IEnumerable<Issue> _ParentIssues)
     {
-        double total = 0.0;
+        var todoIssues = new List<Issue>();
+        HashSet<int> countedTodoIds = new();
+        HashSet<int> visitedParents = new();
+        Queue<int> parentsToVisit = new();
 
         foreach (Issue parent in _ParentIssues)
         {
+            if (parent == null)
+                continue;
+
+            int parentId = parent.Id;
+            if (parentId > 0 && visitedParents.Add(parentId))
+                parentsToVisit.Enqueue(parentId);
+        }
+
+        while (parentsToVisit.Count > 0)
+        {
+            int currentParentId = parentsToVisit.Dequeue();
+
             var parameters = new NameValueCollection
             {
-                { RedmineKeys.TRACKER_ID, "6" },
-                { ParentIdKey, parent.Id.ToString(CultureInfo.InvariantCulture) },
+                { ParentIdKey, currentParentId.ToString(CultureInfo.InvariantCulture) },
                 { RedmineKeys.STATUS_ID, "*" }
             };
 
-            IEnumerable<Issue> todoChildren = await GetIssuesAsync(parameters).ConfigureAwait(false);
-            foreach (Issue child in todoChildren)
+            IEnumerable<Issue> children = await GetIssuesAsync(parameters).ConfigureAwait(false);
+            foreach (Issue child in children)
             {
+                if (child == null)
+                    continue;
+
                 if (child.Subject.Contains("[Suivi]") || child.Subject.Contains("[Analyse]"))
                     continue;
 
-                total += ExtractRemaining(child);
+                int childId = child.Id;
+
+                if (child.Tracker?.Id == 6)
+                {
+                    if (childId <= 0 || countedTodoIds.Add(childId))
+                        todoIssues.Add(child);
+
+                    continue;
+                }
+
+                if (childId > 0 && visitedParents.Add(childId))
+                    parentsToVisit.Enqueue(childId);
             }
         }
 
-        return total;
+        return todoIssues;
     }
 
     private static double ExtractRemaining(Issue _Issue)
@@ -691,6 +777,21 @@ public class RedmineDataFetcher
         }
 
         return map;
+    }
+
+    private sealed class EpicTodoCache
+    {
+        public static readonly EpicTodoCache Empty = new(new HashSet<int>(), 0.0);
+
+        public EpicTodoCache(HashSet<int> _TodoIssueIds, double _dTotalRemaining)
+        {
+            TodoIssueIds = _TodoIssueIds;
+            TotalRemaining = _dTotalRemaining;
+        }
+
+        public HashSet<int> TodoIssueIds { get; }
+
+        public double TotalRemaining { get; }
     }
 
     private sealed class EpicDescriptor

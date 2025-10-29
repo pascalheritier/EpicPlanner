@@ -62,7 +62,7 @@ public class PlanningDataProvider
         Dictionary<string, double> plannedHours = new(StringComparer.OrdinalIgnoreCase);
         List<SprintEpicSummary> epicSummaries = new();
         HashSet<string> plannedEpicNames = epics
-            .Where(e => e.Wishes.Count > 0 && e.Remaining > 0)
+            .Where(e => e.IsInDevelopment)
             .Select(e => e.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (_bIncludePlannedHours)
@@ -96,31 +96,31 @@ public class PlanningDataProvider
 
     private static Dictionary<string, double> LoadPlannedCapacityLookup(
         ExcelPackage _PrimaryPackage,
-        string _PrimaryFilePath,
-        string? _OverrideFilePath,
-        int _InitialSprintNumber)
+        string _strPrimaryFilePath,
+        string? _strOverrideFilePath,
+        int _iInitialSprintNumber)
     {
         ExcelWorksheet? fallbackWorksheet = _PrimaryPackage.Workbook.Worksheets["AllocationsByEpicPerSprint"];
 
-        if (string.IsNullOrWhiteSpace(_OverrideFilePath))
+        if (string.IsNullOrWhiteSpace(_strOverrideFilePath))
         {
-            return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+            return ReadPlannedCapacityByEpic(fallbackWorksheet, _iInitialSprintNumber);
         }
 
         try
         {
-            string resolvedOverridePath = Path.GetFullPath(_OverrideFilePath);
-            string resolvedPrimaryPath = Path.GetFullPath(_PrimaryFilePath);
+            string resolvedOverridePath = Path.GetFullPath(_strOverrideFilePath);
+            string resolvedPrimaryPath = Path.GetFullPath(_strPrimaryFilePath);
 
             if (string.Equals(resolvedOverridePath, resolvedPrimaryPath, StringComparison.OrdinalIgnoreCase))
             {
-                return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+                return ReadPlannedCapacityByEpic(fallbackWorksheet, _iInitialSprintNumber);
             }
 
             if (!File.Exists(resolvedOverridePath))
             {
                 Console.WriteLine($"Warning: Planned capacity file '{resolvedOverridePath}' was not found. Falling back to the primary workbook.");
-                return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+                return ReadPlannedCapacityByEpic(fallbackWorksheet, _iInitialSprintNumber);
             }
 
             using ExcelPackage overridePackage = new(new FileInfo(resolvedOverridePath));
@@ -129,19 +129,19 @@ public class PlanningDataProvider
             if (overrideWorksheet == null || overrideWorksheet.Dimension == null)
             {
                 Console.WriteLine($"Warning: Worksheet 'AllocationsByEpicPerSprint' was not found in '{resolvedOverridePath}'.");
-                return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+                return ReadPlannedCapacityByEpic(fallbackWorksheet, _iInitialSprintNumber);
             }
 
-            return ReadPlannedCapacityByEpic(overrideWorksheet, _InitialSprintNumber);
+            return ReadPlannedCapacityByEpic(overrideWorksheet, _iInitialSprintNumber);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Warning: Failed to load planned capacity file '{_OverrideFilePath}': {ex.Message}");
-            return ReadPlannedCapacityByEpic(fallbackWorksheet, _InitialSprintNumber);
+            Console.WriteLine($"Warning: Failed to load planned capacity file '{_strOverrideFilePath}': {ex.Message}");
+            return ReadPlannedCapacityByEpic(fallbackWorksheet, _iInitialSprintNumber);
         }
     }
 
-    private static Dictionary<string, double> ReadPlannedCapacityByEpic(ExcelWorksheet? _Worksheet, int _InitialSprintNumber)
+    private static Dictionary<string, double> ReadPlannedCapacityByEpic(ExcelWorksheet? _Worksheet, int _iInitialSprintNumber)
     {
         var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         if (_Worksheet?.Dimension == null)
@@ -177,7 +177,7 @@ public class PlanningDataProvider
                 continue;
 
             if (!TryReadSprintNumber(_Worksheet.Cells[row, sprintCol].Value, out int sprintNumber) ||
-                sprintNumber != _InitialSprintNumber)
+                sprintNumber != _iInitialSprintNumber)
             {
                 continue;
             }
@@ -194,34 +194,34 @@ public class PlanningDataProvider
 
         return result;
 
-        static bool TryReadSprintNumber(object? value, out int sprintNumber)
+        static bool TryReadSprintNumber(object? _Value, out int _iSprintNumber)
         {
-            switch (value)
+            switch (_Value)
             {
                 case int i:
-                    sprintNumber = i;
+                    _iSprintNumber = i;
                     return true;
                 case long l:
-                    sprintNumber = (int)l;
+                    _iSprintNumber = (int)l;
                     return true;
                 case double d:
-                    sprintNumber = (int)Math.Round(d);
+                    _iSprintNumber = (int)Math.Round(d);
                     return true;
                 case decimal m:
-                    sprintNumber = (int)Math.Round((double)m);
+                    _iSprintNumber = (int)Math.Round((double)m);
                     return true;
                 case string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed):
-                    sprintNumber = parsed;
+                    _iSprintNumber = parsed;
                     return true;
                 default:
-                    sprintNumber = 0;
+                    _iSprintNumber = 0;
                     return false;
             }
         }
 
-        static double ReadNumericValue(object? value)
+        static double ReadNumericValue(object? _Value)
         {
-            return value switch
+            return _Value switch
             {
                 null => 0.0,
                 double d => d,
