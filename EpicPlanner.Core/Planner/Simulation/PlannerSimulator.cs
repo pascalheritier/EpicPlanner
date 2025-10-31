@@ -19,20 +19,14 @@ public class PlannerSimulator : SimulatorBase
         DateTime _InitialSprintDate,
         int _iSprintDays,
         int _iMaxSprintCount,
-        int _iSprintOffset,
-        Dictionary<string, double>? _PlannedHours = null,
-        IReadOnlyList<SprintEpicSummary>? _EpicSummaries = null,
-        IReadOnlyDictionary<string, double>? _PlannedCapacityByEpic = null)
+        int _iSprintOffset)
         : base(
             _Epics,
             _SprintCapacities,
             _InitialSprintDate,
             _iSprintDays,
             _iMaxSprintCount,
-            _iSprintOffset,
-            _PlannedHours,
-            _EpicSummaries,
-            _PlannedCapacityByEpic)
+            _iSprintOffset)
     {
     }
 
@@ -277,7 +271,7 @@ public class PlannerSimulator : SimulatorBase
         package.SaveAs(new FileInfo(_strOutputExcelFilePath));
     }
 
-    public void ExportGanttSprintBased(string _strOutputPngPath, PlanningMode _enumMode)
+    public void ExportGanttSprintBased(string _strOutputPngPath, EnumPlanningMode _enumMode)
     {
         var ranges = Epics
             .Where(e => e.StartDate.HasValue && e.EndDate.HasValue)
@@ -345,7 +339,7 @@ public class PlannerSimulator : SimulatorBase
         SKColor BORDEAUX = SKColor.Parse("#800020");
         SKColor MAUVE = SKColors.Orchid;
 
-        string title = _enumMode == PlanningMode.Analysis
+        string title = _enumMode == EnumPlanningMode.Analysis
             ? "Gantt - Sprints (Analysis duration)"
             : "Gantt - Sprints (Realisation duration)";
         canvas.DrawText(title, leftLabelPad, 30, titlePaint);
@@ -460,7 +454,7 @@ public class PlannerSimulator : SimulatorBase
         float box = 16f;
 
         List<(string Label, SKColor Color, bool Hatched)> legendItems =
-            _enumMode == PlanningMode.Analysis
+            _enumMode == EnumPlanningMode.Analysis
                 ? new List<(string, SKColor, bool)>
                 {
                     ("In Analysis", MAUVE, false),

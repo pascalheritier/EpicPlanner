@@ -25,7 +25,7 @@ public class CheckingRunner
 
     #region Run
 
-    public async Task<string> RunAsync(CheckerMode _enumMode)
+    public async Task<string> RunAsync(EnumCheckerMode _enumMode)
     {
         PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: true);
         CheckerSimulator simulator = snapshot.CreateCheckerSimulator();
@@ -39,7 +39,7 @@ public class CheckingRunner
 
     #region Helpers
 
-    private string ResolveOutputPath(CheckerMode _enumMode)
+    private string ResolveOutputPath(EnumCheckerMode _enumMode)
     {
         string basePath = m_AppConfiguration.FileConfiguration.OutputFilePath;
         if (string.IsNullOrWhiteSpace(basePath))
@@ -67,7 +67,7 @@ public class CheckingRunner
 
         Directory.CreateDirectory(directory);
 
-        string suffix = _enumMode == CheckerMode.Comparison ? "_Comparison" : "_EpicStates";
+        string suffix = _enumMode == EnumCheckerMode.Comparison ? "_Comparison" : "_EpicStates";
         return Path.Combine(directory, fileName + suffix + extension);
     }
 

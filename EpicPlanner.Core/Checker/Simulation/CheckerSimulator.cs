@@ -11,6 +11,10 @@ namespace EpicPlanner.Core.Checker.Simulation;
 
 public class CheckerSimulator : SimulatorBase
 {
+    private readonly Dictionary<string, double> m_PlannedHours;
+    private readonly IReadOnlyList<SprintEpicSummary> m_EpicSummaries;
+    private readonly Dictionary<string, double> m_PlannedCapacityByEpic;
+
     public CheckerSimulator(
         List<Epic> _Epics,
         Dictionary<int, Dictionary<string, ResourceCapacity>> _SprintCapacities,
@@ -27,23 +31,31 @@ public class CheckerSimulator : SimulatorBase
             _InitialSprintDate,
             _iSprintDays,
             _iMaxSprintCount,
-            _iSprintOffset,
-            _PlannedHours,
-            _EpicSummaries,
-            _PlannedCapacityByEpic)
+            _iSprintOffset)
     {
+        m_PlannedHours = _PlannedHours is not null
+            ? new Dictionary<string, double>(_PlannedHours, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        m_EpicSummaries = _EpicSummaries ?? Array.Empty<SprintEpicSummary>();
+        m_PlannedCapacityByEpic = _PlannedCapacityByEpic is not null
+            ? new Dictionary<string, double>(_PlannedCapacityByEpic, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
     }
 
-    public void ExportCheckerReport(string _strOutputExcelPath, CheckerMode _enumMode)
+    private IReadOnlyDictionary<string, double> PlannedHours => m_PlannedHours;
+    private IReadOnlyList<SprintEpicSummary> EpicSummaries => m_EpicSummaries;
+    private IReadOnlyDictionary<string, double> PlannedCapacityByEpic => m_PlannedCapacityByEpic;
+
+    public void ExportCheckerReport(string _strOutputExcelPath, EnumCheckerMode _enumMode)
     {
         using ExcelPackage package = new();
 
         switch (_enumMode)
         {
-            case CheckerMode.Comparison:
+            case EnumCheckerMode.Comparison:
                 WriteComparisonWorksheet(package);
                 break;
-            case CheckerMode.EpicStates:
+            case EnumCheckerMode.EpicStates:
                 WriteEpicWorksheet(package);
                 break;
             default:

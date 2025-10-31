@@ -17,10 +17,6 @@ public abstract class SimulatorBase
     private readonly int m_iSprintDays;
     private readonly int m_iMaxSprintCount;
     private readonly int m_iSprintOffset;
-    private readonly Dictionary<string, double> m_PlannedHours;
-    private readonly IReadOnlyList<SprintEpicSummary> m_EpicSummaries;
-    private readonly Dictionary<string, double> m_PlannedCapacityByEpic;
-
     private readonly Dictionary<string, DateTime> m_CompletedMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Allocation> m_Allocations = new();
     private readonly List<(int Sprint, string Resource, double Unused, string Reason)> m_Underutilization = new();
@@ -35,10 +31,7 @@ public abstract class SimulatorBase
         DateTime _InitialSprintDate,
         int _iSprintDays,
         int _iMaxSprintCount,
-        int _iSprintOffset,
-        Dictionary<string, double>? _PlannedHours = null,
-        IReadOnlyList<SprintEpicSummary>? _EpicSummaries = null,
-        IReadOnlyDictionary<string, double>? _PlannedCapacityByEpic = null)
+        int _iSprintOffset)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
@@ -46,13 +39,6 @@ public abstract class SimulatorBase
         m_iSprintDays = _iSprintDays;
         m_iMaxSprintCount = _iMaxSprintCount;
         m_iSprintOffset = _iSprintOffset;
-        m_PlannedHours = _PlannedHours is not null
-            ? new Dictionary<string, double>(_PlannedHours, StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        m_EpicSummaries = _EpicSummaries ?? Array.Empty<SprintEpicSummary>();
-        m_PlannedCapacityByEpic = _PlannedCapacityByEpic is not null
-            ? new Dictionary<string, double>(_PlannedCapacityByEpic, StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var epic in _Epics.Where(e => e.Remaining <= 0))
         {
@@ -69,9 +55,6 @@ public abstract class SimulatorBase
     public int SprintLengthDays => m_iSprintDays;
     public int MaxSprintCount => m_iMaxSprintCount;
     protected int SprintOffset => m_iSprintOffset;
-    protected IReadOnlyDictionary<string, double> PlannedHours => m_PlannedHours;
-    protected IReadOnlyList<SprintEpicSummary> EpicSummaries => m_EpicSummaries;
-    protected IReadOnlyDictionary<string, double> PlannedCapacityByEpic => m_PlannedCapacityByEpic;
     protected IReadOnlyDictionary<int, Dictionary<string, ResourceCapacity>> SprintCapacities => m_SprintCapacities;
     protected IReadOnlyList<Allocation> AllocationHistory => m_Allocations;
     protected IReadOnlyList<(int Sprint, string Resource, double Unused, string Reason)> UnderutilizationEntries => m_Underutilization;

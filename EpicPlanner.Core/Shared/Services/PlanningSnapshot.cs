@@ -69,10 +69,7 @@ public class PlanningSnapshot
             m_InitialSprintStart,
             m_iSprintDays,
             m_iMaxSprintCount,
-            m_iSprintOffset,
-            m_PlannedHours,
-            m_EpicSummaries,
-            m_PlannedCapacityByEpic);
+            m_iSprintOffset);
     }
 
     public CheckerSimulator CreateCheckerSimulator(Func<Epic, bool>? _Filter = null)

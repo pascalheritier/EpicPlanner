@@ -29,13 +29,13 @@ public class PlanningRunner
     
     #region Run
 
-    public async Task RunAsync(PlanningMode _enumMode)
+    public async Task RunAsync(EnumPlanningMode _enumMode)
     {
-        bool includePlannedHours = _enumMode == PlanningMode.Standard;
+        bool includePlannedHours = _enumMode == EnumPlanningMode.Standard;
 
         PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: includePlannedHours);
 
-        if (_enumMode == PlanningMode.Analysis)
+        if (_enumMode == EnumPlanningMode.Analysis)
         {
             HashSet<string> analysisScope = BuildAnalysisScope(snapshot.Epics);
             PlannerSimulator simulator = snapshot.CreatePlannerSimulator(epic => analysisScope.Contains(epic.Name));
@@ -48,7 +48,7 @@ public class PlanningRunner
 
             simulator.ExportGanttSprintBased(
                 m_AppConfiguration.FileConfiguration.OutputPngFilePath,
-                PlanningMode.Analysis);
+                EnumPlanningMode.Analysis);
             return;
         }
 
@@ -57,7 +57,7 @@ public class PlanningRunner
         standardSimulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
         standardSimulator.ExportGanttSprintBased(
             m_AppConfiguration.FileConfiguration.OutputPngFilePath,
-            PlanningMode.Standard);
+            EnumPlanningMode.Standard);
     }
 
     #endregion

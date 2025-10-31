@@ -14,4 +14,4 @@ The following classes originated under `EpicPlanner.Core/Services` and `EpicPlan
 | `SprintEpicSummary` | Stores consumption metrics per epic and sprint. | Displayed in planning exports alongside capacity allocations. | Compared with Redmine data in checker reports for variance analysis. |
 | `Wish` | Captures desired resource allocations parsed from the backlog. | Feeds the simulator's planning algorithm when scheduling work. | Checker output cites wish data when highlighting allocation gaps. |
 
-Classes that are application-specific are now scoped under `EpicPlanner.Core.Planner` (`PlanningRunner`, `PlanningMode`, planner DI extensions) and `EpicPlanner.Core.Checker` (`CheckingRunner`, `CheckerMode`, checker DI extensions`).
+Classes that are application-specific are now scoped under `EpicPlanner.Core.Planner` (`PlanningRunner`, `EnumPlanningMode`, planner DI extensions) and `EpicPlanner.Core.Checker` (`CheckingRunner`, `EnumCheckerMode`, checker DI extensions`).

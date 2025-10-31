@@ -359,11 +359,11 @@ public class PlanningDataProvider
             string depRaw = depCol > 0 ? (_EpicWorksheet.Cells[row, depCol].GetValue<string>() ?? string.Empty) : string.Empty;
             string endAnalysisStr = endAnalysisCol > 0 ? (_EpicWorksheet.Cells[row, endAnalysisCol].GetValue<string>() ?? string.Empty) : string.Empty;
             string priorityStr = priorityCol > 0 ? (_EpicWorksheet.Cells[row, priorityCol].Text?.Trim() ?? "Normal") : "Normal";
-            EpicPriority priority = priorityStr.ToLower() switch
+            EnumEpicPriority priority = priorityStr.ToLower() switch
             {
-                "urgent" => EpicPriority.Urgent,
-                "high" => EpicPriority.High,
-                _ => EpicPriority.Normal
+                "urgent" => EnumEpicPriority.Urgent,
+                "high" => EnumEpicPriority.High,
+                _ => EnumEpicPriority.Normal
             };
             DateTime? endAnalysis = null;
             if (DateTime.TryParse(endAnalysisStr, out var parsed))

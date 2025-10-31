@@ -1,6 +1,6 @@
 namespace EpicPlanner.Core.Planner;
 
-public enum PlanningMode
+public enum EnumPlanningMode
 {
     Standard,
     Analysis

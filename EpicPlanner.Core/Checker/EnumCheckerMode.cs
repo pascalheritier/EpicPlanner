@@ -1,6 +1,6 @@
 namespace EpicPlanner.Core.Checker;
 
-public enum CheckerMode
+public enum EnumCheckerMode
 {
     Comparison,
     EpicStates
