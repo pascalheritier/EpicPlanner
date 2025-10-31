@@ -5,10 +5,10 @@ namespace EpicPlanner.Core.Checker;
 
 public static class CheckerServiceCollectionExtensions
 {
-    public static IServiceCollection AddCheckerCore(this IServiceCollection services)
+    public static IServiceCollection AddCheckerCore(this IServiceCollection _Services)
     {
-        services.AddSingleton<PlanningDataProvider>();
-        services.AddTransient<CheckingRunner>();
-        return services;
+        _Services.AddSingleton<PlanningDataProvider>();
+        _Services.AddTransient<CheckingRunner>();
+        return _Services;
     }
 }

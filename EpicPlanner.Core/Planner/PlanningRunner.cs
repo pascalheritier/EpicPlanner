@@ -1,10 +1,12 @@
 using EpicPlanner.Core.Configuration;
+using EpicPlanner.Core.Planner.Services;
 using EpicPlanner.Core.Planner.Simulation;
 using EpicPlanner.Core.Shared.Models;
 using EpicPlanner.Core.Shared.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace EpicPlanner.Core.Planner;
 
@@ -33,7 +35,7 @@ public class PlanningRunner
     {
         bool includePlannedHours = _enumMode == EnumPlanningMode.Standard;
 
-        PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: includePlannedHours);
+        PlannerPlanningSnapshot snapshot = await m_DataProvider.LoadPlannerSnapshotAsync(_bIncludePlannedHours: includePlannedHours);
 
         if (_enumMode == EnumPlanningMode.Analysis)
         {

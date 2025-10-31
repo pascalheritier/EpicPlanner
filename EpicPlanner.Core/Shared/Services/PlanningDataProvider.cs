@@ -1,9 +1,12 @@
+using EpicPlanner.Core.Checker.Services;
 using EpicPlanner.Core.Configuration;
+using EpicPlanner.Core.Planner.Services;
 using EpicPlanner.Core.Shared.Models;
 using OfficeOpenXml;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace EpicPlanner.Core.Shared.Services;
 
@@ -32,7 +35,36 @@ public class PlanningDataProvider
 
     #region Load data
 
-    public async Task<PlanningSnapshot> LoadAsync(bool _bIncludePlannedHours)
+    public async Task<PlannerPlanningSnapshot> LoadPlannerSnapshotAsync(bool _bIncludePlannedHours)
+    {
+        PlanningSnapshotComponents components = await LoadComponentsAsync(_bIncludePlannedHours);
+
+        return new PlannerPlanningSnapshot(
+            components.Epics,
+            components.AdjustedCapacities,
+            m_InitialSprintStart,
+            m_iSprintDays,
+            m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
+            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber);
+    }
+
+    public async Task<CheckerPlanningSnapshot> LoadCheckerSnapshotAsync()
+    {
+        PlanningSnapshotComponents components = await LoadComponentsAsync(_bIncludePlannedHours: true);
+
+        return new CheckerPlanningSnapshot(
+            components.Epics,
+            components.AdjustedCapacities,
+            m_InitialSprintStart,
+            m_iSprintDays,
+            m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
+            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
+            components.PlannedHours,
+            components.EpicSummaries,
+            components.PlannedCapacityByEpic);
+    }
+
+    private async Task<PlanningSnapshotComponents> LoadComponentsAsync(bool _bIncludePlannedHours)
     {
         using ExcelPackage package = new(new FileInfo(m_AppConfiguration.FileConfiguration.InputFilePath));
         ExcelWorksheet wsEpics = package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName]
@@ -83,17 +115,20 @@ public class PlanningDataProvider
                 plannedCapacityByEpic.Count > 0 ? plannedCapacityByEpic : null);
         }
 
-        return new PlanningSnapshot(
+        return new PlanningSnapshotComponents(
             epics,
             adjustedCapacities,
-            m_InitialSprintStart,
-            m_iSprintDays,
-            m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
-            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber,
             plannedHours,
             epicSummaries,
             plannedCapacityByEpic);
     }
+
+    private sealed record PlanningSnapshotComponents(
+        List<Epic> Epics,
+        Dictionary<int, Dictionary<string, ResourceCapacity>> AdjustedCapacities,
+        Dictionary<string, double> PlannedHours,
+        IReadOnlyList<SprintEpicSummary> EpicSummaries,
+        Dictionary<string, double> PlannedCapacityByEpic);
 
     private static Dictionary<string, double> LoadPlannedCapacityLookup(
         ExcelPackage _PrimaryPackage,

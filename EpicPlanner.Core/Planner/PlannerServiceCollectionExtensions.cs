@@ -5,10 +5,10 @@ namespace EpicPlanner.Core.Planner;
 
 public static class PlannerServiceCollectionExtensions
 {
-    public static IServiceCollection AddPlannerCore(this IServiceCollection services)
+    public static IServiceCollection AddPlannerCore(this IServiceCollection _Services)
     {
-        services.AddSingleton<PlanningDataProvider>();
-        services.AddTransient<PlanningRunner>();
-        return services;
+        _Services.AddSingleton<PlanningDataProvider>();
+        _Services.AddTransient<PlanningRunner>();
+        return _Services;
     }
 }
