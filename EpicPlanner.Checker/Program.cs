@@ -15,13 +15,13 @@ internal class Program
     private const string AppSettingsFileName = "appsettings.json";
     private const string LogConfigFileName = "NLog.config";
 
-    static async Task Main(string[] args)
+    static async Task Main(string[] _Args)
     {
         try
         {
             ExcelPackage.License.SetNonCommercialPersonal("Adonite");
 
-            EnumCheckerMode mode = ResolveMode(args);
+            EnumCheckerMode mode = ResolveMode(_Args);
 
             IServiceCollection services = new ServiceCollection();
             ConfigureServices(services);

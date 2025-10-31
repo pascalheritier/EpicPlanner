@@ -5,6 +5,7 @@ using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using EpicPlanner.Core.Shared.Models;
 using Redmine.Net.Api;
 using Redmine.Net.Api.Net;
 using Redmine.Net.Api.Types;
