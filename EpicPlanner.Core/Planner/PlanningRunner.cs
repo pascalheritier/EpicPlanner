@@ -1,8 +1,14 @@
+using EpicPlanner.Core.Configuration;
+using EpicPlanner.Core.Planner.Services;
+using EpicPlanner.Core.Planner.Simulation;
+using EpicPlanner.Core.Shared.Models;
+using EpicPlanner.Core.Shared.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 
-namespace EpicPlanner.Core;
+namespace EpicPlanner.Core.Planner;
 
 public class PlanningRunner
 {
@@ -25,16 +31,16 @@ public class PlanningRunner
     
     #region Run
 
-    public async Task RunAsync(PlanningMode _enumMode)
+    public async Task RunAsync(EnumPlanningMode _enumMode)
     {
-        bool includePlannedHours = _enumMode == PlanningMode.Standard;
+        bool includePlannedHours = _enumMode == EnumPlanningMode.Standard;
 
-        PlanningSnapshot snapshot = await m_DataProvider.LoadAsync(_bIncludePlannedHours: includePlannedHours);
+        PlannerPlanningSnapshot snapshot = await m_DataProvider.LoadPlannerSnapshotAsync(_bIncludePlannedHours: includePlannedHours);
 
-        if (_enumMode == PlanningMode.Analysis)
+        if (_enumMode == EnumPlanningMode.Analysis)
         {
             HashSet<string> analysisScope = BuildAnalysisScope(snapshot.Epics);
-            Simulator simulator = snapshot.CreateSimulator(epic => analysisScope.Contains(epic.Name));
+            PlannerSimulator simulator = snapshot.CreatePlannerSimulator(epic => analysisScope.Contains(epic.Name));
             simulator.Run();
             AlignAnalysisEpicsToEndDates(
                 simulator.Epics,
@@ -44,16 +50,16 @@ public class PlanningRunner
 
             simulator.ExportGanttSprintBased(
                 m_AppConfiguration.FileConfiguration.OutputPngFilePath,
-                PlanningMode.Analysis);
+                EnumPlanningMode.Analysis);
             return;
         }
 
-        Simulator standardSimulator = snapshot.CreateSimulator();
+        PlannerSimulator standardSimulator = snapshot.CreatePlannerSimulator();
         standardSimulator.Run();
         standardSimulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
         standardSimulator.ExportGanttSprintBased(
             m_AppConfiguration.FileConfiguration.OutputPngFilePath,
-            PlanningMode.Standard);
+            EnumPlanningMode.Standard);
     }
 
     #endregion

@@ -1,4 +1,4 @@
-namespace EpicPlanner.Core;
+namespace EpicPlanner.Core.Checker;
 
 public enum EnumCheckerMode
 {

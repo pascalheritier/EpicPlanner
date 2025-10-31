@@ -1,4 +1,4 @@
-namespace EpicPlanner.Core;
+namespace EpicPlanner.Core.Shared.Models;
 
 public class ResourceCapacity
 {

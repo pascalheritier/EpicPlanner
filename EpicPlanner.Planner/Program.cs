@@ -1,4 +1,5 @@
-using EpicPlanner.Core;
+using EpicPlanner.Core.Configuration;
+using EpicPlanner.Core.Planner;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -14,13 +15,13 @@ internal class Program
     private const string AppSettingsFileName = "appsettings.json";
     private const string LogConfigFileName = "NLog.config";
 
-    static async Task Main(string[] args)
+    static async Task Main(string[] _Args)
     {
         try
         {
             ExcelPackage.License.SetNonCommercialPersonal("Adonite");
 
-            PlanningMode mode = ResolvePlanningMode(args);
+            EnumPlanningMode mode = ResolvePlanningMode(_Args);
 
             IServiceCollection services = new ServiceCollection();
             ConfigureServices(services);
@@ -31,7 +32,7 @@ internal class Program
 
             AppConfiguration config = serviceProvider.GetRequiredService<AppConfiguration>();
             LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, "✅ Planning completed");
-            if (mode == PlanningMode.Standard)
+            if (mode == EnumPlanningMode.Standard)
             {
                 LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"Excel: {Path.GetFullPath(config.FileConfiguration.OutputFilePath)}");
             }
@@ -53,8 +54,7 @@ internal class Program
             .Build();
 
         _Services.AddSingleton(_ => GetAppConfiguration(config));
-        _Services.AddSingleton<PlanningDataProvider>();
-        _Services.AddTransient<PlanningRunner>();
+        _Services.AddPlannerCore();
 
         _Services.AddLogging(loggingBuilder =>
         {
@@ -84,11 +84,11 @@ internal class Program
         return appConfiguration;
     }
 
-    private static PlanningMode ResolvePlanningMode(string[] _Args)
+    private static EnumPlanningMode ResolvePlanningMode(string[] _Args)
     {
         if (_Args.Length > 1 && _Args[0].Equals("--mode", StringComparison.OrdinalIgnoreCase))
         {
-            if (TryParsePlanningMode(_Args[1], out PlanningMode fromFlag))
+            if (TryParsePlanningMode(_Args[1], out EnumPlanningMode fromFlag))
             {
                 return fromFlag;
             }
@@ -99,12 +99,12 @@ internal class Program
             if (arg.StartsWith("--mode=", StringComparison.OrdinalIgnoreCase))
             {
                 string candidate = arg[("--mode=").Length..];
-                if (TryParsePlanningMode(candidate, out PlanningMode modeFromOption))
+                if (TryParsePlanningMode(candidate, out EnumPlanningMode modeFromOption))
                 {
                     return modeFromOption;
                 }
             }
-            else if (TryParsePlanningMode(arg, out PlanningMode directMode))
+            else if (TryParsePlanningMode(arg, out EnumPlanningMode directMode))
             {
                 return directMode;
             }
@@ -121,10 +121,10 @@ internal class Program
             if (input is null)
             {
                 Console.WriteLine("No input detected. Defaulting to standard planning.");
-                return PlanningMode.Standard;
+                return EnumPlanningMode.Standard;
             }
 
-            if (TryParsePlanningMode(input, out PlanningMode parsed))
+            if (TryParsePlanningMode(input, out EnumPlanningMode parsed))
             {
                 return parsed;
             }
@@ -133,9 +133,9 @@ internal class Program
         }
     }
 
-    private static bool TryParsePlanningMode(string? _strInput, out PlanningMode _enumMode)
+    private static bool TryParsePlanningMode(string? _strInput, out EnumPlanningMode _enumMode)
     {
-        _enumMode = PlanningMode.Standard;
+        _enumMode = EnumPlanningMode.Standard;
         if (string.IsNullOrWhiteSpace(_strInput))
         {
             return false;
@@ -149,7 +149,7 @@ internal class Program
             value.Equals("planning", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("sprint", StringComparison.OrdinalIgnoreCase))
         {
-            _enumMode = PlanningMode.Standard;
+            _enumMode = EnumPlanningMode.Standard;
             return true;
         }
 
@@ -158,7 +158,7 @@ internal class Program
             value.Equals("strategic", StringComparison.OrdinalIgnoreCase) ||
             value.Equals("strategy", StringComparison.OrdinalIgnoreCase))
         {
-            _enumMode = PlanningMode.Analysis;
+            _enumMode = EnumPlanningMode.Analysis;
             return true;
         }
 

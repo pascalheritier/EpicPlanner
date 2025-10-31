@@ -1,14 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace EpicPlanner.Core;
-
-public enum EpicPriority
-{
-    Normal,
-    High,
-    Urgent
-}
+namespace EpicPlanner.Core.Shared.Models;
 
 public class Epic
 {
@@ -31,7 +24,7 @@ public class Epic
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
     public List<Allocation> History { get; } = new();
-    public EpicPriority Priority { get; set; } = EpicPriority.Normal;
+    public EnumEpicPriority Priority { get; set; } = EnumEpicPriority.Normal;
 
     public bool IsInDevelopment => State.Contains("develop") && !State.Contains("pending");
     public bool IsOtherAllowed => State.Contains("analysis") || State.Contains("pending");

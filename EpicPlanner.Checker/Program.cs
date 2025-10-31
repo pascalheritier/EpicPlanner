@@ -1,4 +1,5 @@
-using EpicPlanner.Core;
+using EpicPlanner.Core.Checker;
+using EpicPlanner.Core.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -14,13 +15,13 @@ internal class Program
     private const string AppSettingsFileName = "appsettings.json";
     private const string LogConfigFileName = "NLog.config";
 
-    static async Task Main(string[] args)
+    static async Task Main(string[] _Args)
     {
         try
         {
             ExcelPackage.License.SetNonCommercialPersonal("Adonite");
 
-            EnumCheckerMode mode = ResolveMode(args);
+            EnumCheckerMode mode = ResolveMode(_Args);
 
             IServiceCollection services = new ServiceCollection();
             ConfigureServices(services);
@@ -49,8 +50,7 @@ internal class Program
             .Build();
 
         _Services.AddSingleton(_ => GetAppConfiguration(config));
-        _Services.AddSingleton<PlanningDataProvider>();
-        _Services.AddTransient<CheckingRunner>();
+        _Services.AddCheckerCore();
 
         _Services.AddLogging(loggingBuilder =>
         {
