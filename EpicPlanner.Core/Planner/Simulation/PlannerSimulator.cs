@@ -271,10 +271,20 @@ public class PlannerSimulator : SimulatorBase
         package.SaveAs(new FileInfo(_strOutputExcelFilePath));
     }
 
-    public void ExportGanttSprintBased(string _strOutputPngPath, EnumPlanningMode _enumMode)
+    public void ExportGanttSprintBased(
+        string _strOutputPngPath,
+        EnumPlanningMode _enumMode,
+        bool _bIncludeNonInDevelopmentEpics = true)
     {
-        var ranges = Epics
-            .Where(e => e.StartDate.HasValue && e.EndDate.HasValue)
+        IEnumerable<Epic> epicSource = Epics
+            .Where(e => e.StartDate.HasValue && e.EndDate.HasValue);
+
+        if (_enumMode == EnumPlanningMode.Standard && !_bIncludeNonInDevelopmentEpics)
+        {
+            epicSource = epicSource.Where(e => e.IsInDevelopment);
+        }
+
+        var ranges = epicSource
             .Select(e =>
             {
                 float start = SprintPosition(e.StartDate.Value, false);
@@ -482,14 +492,19 @@ public class PlannerSimulator : SimulatorBase
                     ("Pending Analysis", BORDEAUX, false),
                     ("Analysis (no end date)", MAUVE, true)
                 }
-                : new List<(string, SKColor, bool)>
-                {
-                    ("In Development", LIGHT_GREEN, false),
-                    ("In Analysis", MAUVE, false),
-                    ("Pending Analysis", BORDEAUX, false),
-                    ("Pending Development", LIGHT_BLUE, false),
-                    ("Analysis (no end date)", MAUVE, true)
-                };
+                : _bIncludeNonInDevelopmentEpics
+                    ? new List<(string, SKColor, bool)>
+                    {
+                        ("In Development", LIGHT_GREEN, false),
+                        ("In Analysis", MAUVE, false),
+                        ("Pending Analysis", BORDEAUX, false),
+                        ("Pending Development", LIGHT_BLUE, false),
+                        ("Analysis (no end date)", MAUVE, true)
+                    }
+                    : new List<(string, SKColor, bool)>
+                    {
+                        ("In Development", LIGHT_GREEN, false)
+                    };
 
         foreach (var item in legendItems)
         {
