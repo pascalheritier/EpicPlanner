@@ -10,7 +10,7 @@ public class CheckerPlanningSnapshot : PlanningSnapshotBase
 {
     #region Members
 
-    private readonly Dictionary<string, double> m_PlannedHours;
+    private readonly Dictionary<string, ResourcePlannedHoursBreakdown> m_PlannedHours;
     private readonly IReadOnlyList<SprintEpicSummary> m_EpicSummaries;
     private readonly Dictionary<string, double> m_PlannedCapacityByEpic;
 
@@ -25,7 +25,7 @@ public class CheckerPlanningSnapshot : PlanningSnapshotBase
         int _iSprintDays,
         int _iMaxSprintCount,
         int _iSprintOffset,
-        Dictionary<string, double> _PlannedHours,
+        Dictionary<string, ResourcePlannedHoursBreakdown> _PlannedHours,
         IReadOnlyList<SprintEpicSummary> _EpicSummaries,
         IReadOnlyDictionary<string, double> _PlannedCapacityByEpic)
         : base(
@@ -47,7 +47,7 @@ public class CheckerPlanningSnapshot : PlanningSnapshotBase
 
     #region Properties
 
-    public IReadOnlyDictionary<string, double> PlannedHours => m_PlannedHours;
+    public IReadOnlyDictionary<string, ResourcePlannedHoursBreakdown> PlannedHours => m_PlannedHours;
 
     public IReadOnlyList<SprintEpicSummary> EpicSummaries => m_EpicSummaries;
 

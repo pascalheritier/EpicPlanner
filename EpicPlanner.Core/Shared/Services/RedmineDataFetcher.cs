@@ -75,13 +75,13 @@ public class RedmineDataFetcher
         return result;
     }
 
-    public async Task<Dictionary<string, double>> GetPlannedHoursForSprintAsync(
+    public async Task<Dictionary<string, ResourcePlannedHoursBreakdown>> GetPlannedHoursForSprintAsync(
         int _iSprintNumber,
         DateTime _SprintStart,
         DateTime _SprintEnd,
         IReadOnlyCollection<string> _PlannedEpics)
     {
-        var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, ResourcePlannedHoursBreakdown>(StringComparer.OrdinalIgnoreCase);
         HashSet<string>? plannedEpicSet = (_PlannedEpics?.Count ?? 0) > 0
             ? new HashSet<string>(_PlannedEpics, StringComparer.OrdinalIgnoreCase)
             : null;
@@ -96,18 +96,6 @@ public class RedmineDataFetcher
             if (issue.AssignedTo == null || issue.Subject.Contains("[Suivi]") || issue.Subject.Contains("[Analyse]"))
                 continue;
 
-            if (plannedEpicSet != null)
-            {
-                EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(issue, parentCache!).ConfigureAwait(false);
-                if (!plannedEpicSet.Contains(descriptor.Name))
-                    continue;
-
-                if (issue.Id > 0)
-                {
-                    parentCache[issue.Id] = issue;
-                }
-            }
-
             IssueCustomField? estimation = issue.CustomFields.FirstOrDefault(_Field => _Field.Name == "Reste à faire");
             if (estimation?.Values == null)
                 continue;
@@ -116,10 +104,30 @@ public class RedmineDataFetcher
             if (string.IsNullOrWhiteSpace(rawHours))
                 continue;
 
-            string user = issue.AssignedTo.Name;
             double.TryParse(rawHours, NumberStyles.Any, CultureInfo.InvariantCulture, out double hours);
-            if (!result.ContainsKey(user)) result[user] = 0;
-            result[user] += hours;
+            if (hours <= 0)
+                continue;
+
+            bool isEpicIssue = plannedEpicSet == null;
+            if (plannedEpicSet != null)
+            {
+                EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(issue, parentCache!).ConfigureAwait(false);
+                isEpicIssue = plannedEpicSet.Contains(descriptor.Name);
+
+                if (issue.Id > 0)
+                {
+                    parentCache[issue.Id] = issue;
+                }
+            }
+
+            string user = issue.AssignedTo.Name;
+            if (!result.TryGetValue(user, out ResourcePlannedHoursBreakdown? breakdown))
+            {
+                breakdown = new ResourcePlannedHoursBreakdown();
+                result[user] = breakdown;
+            }
+
+            breakdown.AddHours(hours, isEpicIssue);
         }
 
         return result;

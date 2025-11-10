@@ -92,7 +92,7 @@ public class PlanningDataProvider
             absencesPerResource,
             m_AppConfiguration.PlannerConfiguration.Holidays);
 
-        Dictionary<string, double> plannedHours = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, ResourcePlannedHoursBreakdown> plannedHours = new(StringComparer.OrdinalIgnoreCase);
         List<SprintEpicSummary> epicSummaries = new();
         HashSet<string> plannedEpicNames = epics
             .Where(e => e.IsInDevelopment)
@@ -126,7 +126,7 @@ public class PlanningDataProvider
     private sealed record PlanningSnapshotComponents(
         List<Epic> Epics,
         Dictionary<int, Dictionary<string, ResourceCapacity>> AdjustedCapacities,
-        Dictionary<string, double> PlannedHours,
+        Dictionary<string, ResourcePlannedHoursBreakdown> PlannedHours,
         IReadOnlyList<SprintEpicSummary> EpicSummaries,
         Dictionary<string, double> PlannedCapacityByEpic);
 
