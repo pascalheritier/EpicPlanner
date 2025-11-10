@@ -492,14 +492,19 @@ public class PlannerSimulator : SimulatorBase
                     ("Pending Analysis", BORDEAUX, false),
                     ("Analysis (no end date)", MAUVE, true)
                 }
-                : new List<(string, SKColor, bool)>
-                {
-                    ("In Development", LIGHT_GREEN, false),
-                    ("In Analysis", MAUVE, false),
-                    ("Pending Analysis", BORDEAUX, false),
-                    ("Pending Development", LIGHT_BLUE, false),
-                    ("Analysis (no end date)", MAUVE, true)
-                };
+                : _bIncludeNonInDevelopmentEpics
+                    ? new List<(string, SKColor, bool)>
+                    {
+                        ("In Development", LIGHT_GREEN, false),
+                        ("In Analysis", MAUVE, false),
+                        ("Pending Analysis", BORDEAUX, false),
+                        ("Pending Development", LIGHT_BLUE, false),
+                        ("Analysis (no end date)", MAUVE, true)
+                    }
+                    : new List<(string, SKColor, bool)>
+                    {
+                        ("In Development", LIGHT_GREEN, false)
+                    };
 
         foreach (var item in legendItems)
         {
