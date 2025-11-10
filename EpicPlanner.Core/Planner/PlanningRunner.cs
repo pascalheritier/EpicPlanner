@@ -59,7 +59,8 @@ public class PlanningRunner
         standardSimulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
         standardSimulator.ExportGanttSprintBased(
             m_AppConfiguration.FileConfiguration.OutputPngFilePath,
-            EnumPlanningMode.Standard);
+            EnumPlanningMode.Standard,
+            m_AppConfiguration.PlannerConfiguration.IncludeNonInDevelopmentEpicsInRealisationGantt);
     }
 
     #endregion

@@ -271,10 +271,20 @@ public class PlannerSimulator : SimulatorBase
         package.SaveAs(new FileInfo(_strOutputExcelFilePath));
     }
 
-    public void ExportGanttSprintBased(string _strOutputPngPath, EnumPlanningMode _enumMode)
+    public void ExportGanttSprintBased(
+        string _strOutputPngPath,
+        EnumPlanningMode _enumMode,
+        bool _bIncludeNonInDevelopmentEpics = true)
     {
-        var ranges = Epics
-            .Where(e => e.StartDate.HasValue && e.EndDate.HasValue)
+        IEnumerable<Epic> epicSource = Epics
+            .Where(e => e.StartDate.HasValue && e.EndDate.HasValue);
+
+        if (_enumMode == EnumPlanningMode.Standard && !_bIncludeNonInDevelopmentEpics)
+        {
+            epicSource = epicSource.Where(e => e.IsInDevelopment);
+        }
+
+        var ranges = epicSource
             .Select(e =>
             {
                 float start = SprintPosition(e.StartDate.Value, false);

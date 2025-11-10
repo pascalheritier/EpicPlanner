@@ -25,6 +25,7 @@ public class PlannerConfiguration
     public int SprintCapacityDays { get; set; }
     public int MaxSprintCount { get; set; }
     public List<DateTime> Holidays { get; set; } = new();
+    public bool IncludeNonInDevelopmentEpicsInRealisationGantt { get; set; } = true;
 }
 
 public class RedmineConfiguration
