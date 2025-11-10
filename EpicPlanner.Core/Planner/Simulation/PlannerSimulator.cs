@@ -275,14 +275,35 @@ public class PlannerSimulator : SimulatorBase
     {
         var ranges = Epics
             .Where(e => e.StartDate.HasValue && e.EndDate.HasValue)
-            .Select(e => new
+            .Select(e =>
             {
-                e.Name,
-                e.State,
-                StartPosition = SprintPosition(e.StartDate.Value, false),
-                EndPosition = SprintPosition(e.EndDate.Value, true),
-                Key = ExtractEpicKey(e.Name),
-                Hatched = !e.EndAnalysis.HasValue && e.State.Contains("analysis", StringComparison.OrdinalIgnoreCase)
+                float start = SprintPosition(e.StartDate.Value, false);
+                float end = SprintPosition(e.EndDate.Value, true);
+
+                if (_enumMode == EnumPlanningMode.Standard)
+                {
+                    start = (float)Math.Floor(start);
+                    if (start < 0f)
+                    {
+                        start = 0f;
+                    }
+
+                    end = (float)Math.Ceiling(end);
+                    if (end < start + 1f)
+                    {
+                        end = start + 1f;
+                    }
+                }
+
+                return new
+                {
+                    e.Name,
+                    e.State,
+                    StartPosition = start,
+                    EndPosition = end,
+                    Key = ExtractEpicKey(e.Name),
+                    Hatched = !e.EndAnalysis.HasValue && e.State.Contains("analysis", StringComparison.OrdinalIgnoreCase)
+                };
             })
             .OrderBy(r => r.StartPosition)
             .ThenBy(r => r.Key.Year)
