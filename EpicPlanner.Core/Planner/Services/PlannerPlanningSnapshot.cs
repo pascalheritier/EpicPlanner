@@ -33,7 +33,7 @@ public class PlannerPlanningSnapshot : PlanningSnapshotBase
 
     public PlannerSimulator CreatePlannerSimulator(
         Func<Epic, bool>? _Filter = null,
-        bool _OnlyDevelopmentEpics = false)
+        bool _bOnlyDevelopmentEpics = false)
     {
         List<Epic> epics = FilterEpics(_Filter);
 
@@ -44,7 +44,7 @@ public class PlannerPlanningSnapshot : PlanningSnapshotBase
             SprintDays,
             MaxSprintCount,
             SprintOffset,
-            _OnlyDevelopmentEpics);
+            _bOnlyDevelopmentEpics);
     }
 
     #endregion

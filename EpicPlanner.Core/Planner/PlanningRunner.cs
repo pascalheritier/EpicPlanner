@@ -56,7 +56,7 @@ public class PlanningRunner
 
         bool onlyDevelopmentEpics = m_AppConfiguration.PlannerConfiguration.OnlyDevelopmentEpics;
         PlannerSimulator standardSimulator = snapshot.CreatePlannerSimulator(
-            _OnlyDevelopmentEpics: onlyDevelopmentEpics);
+            _bOnlyDevelopmentEpics: onlyDevelopmentEpics);
         standardSimulator.Run();
         standardSimulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
         standardSimulator.ExportGanttSprintBased(

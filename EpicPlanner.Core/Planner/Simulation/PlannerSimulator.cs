@@ -20,7 +20,7 @@ public class PlannerSimulator : SimulatorBase
         int _iSprintDays,
         int _iMaxSprintCount,
         int _iSprintOffset,
-        bool _OnlyDevelopmentEpics = false)
+        bool _bOnlyDevelopmentEpics = false)
         : base(
             _Epics,
             _SprintCapacities,
@@ -28,7 +28,7 @@ public class PlannerSimulator : SimulatorBase
             _iSprintDays,
             _iMaxSprintCount,
             _iSprintOffset,
-            _OnlyDevelopmentEpics)
+            _bOnlyDevelopmentEpics)
     {
     }
 
@@ -37,6 +37,14 @@ public class PlannerSimulator : SimulatorBase
         var reportedEpics = OnlyDevelopmentEpics
             ? Epics.Where(e => e.IsInDevelopment).ToList()
             : Epics.ToList();
+        HashSet<string>? reportedEpicNames = OnlyDevelopmentEpics
+            ? new HashSet<string>(reportedEpics.Select(e => e.Name), StringComparer.OrdinalIgnoreCase)
+            : null;
+        List<Allocation> filteredAllocations = reportedEpicNames == null
+            ? AllocationHistory.ToList()
+            : AllocationHistory
+                .Where(allocation => reportedEpicNames.Contains(allocation.Epic))
+                .ToList();
 
         using var package = new ExcelPackage();
         var wsFinal = package.Workbook.Worksheets.Add("FinalSchedule");
@@ -96,7 +104,7 @@ public class PlannerSimulator : SimulatorBase
         }
         wsFinal.Cells.AutoFitColumns();
 
-        var aggA1 = AllocationHistory
+        var aggA1 = filteredAllocations
             .GroupBy(a => new { a.Epic, a.Sprint, a.Resource })
             .Select(g => new { g.Key.Epic, g.Key.Sprint, g.Key.Resource, Hours = Math.Round(g.Sum(x => x.Hours), 2) })
             .OrderBy(x => x.Sprint)
@@ -115,7 +123,7 @@ public class PlannerSimulator : SimulatorBase
         }
         wsA1.Cells.AutoFitColumns();
 
-        var aggA2 = AllocationHistory
+        var aggA2 = filteredAllocations
             .GroupBy(a => new { a.Epic, a.Sprint, a.SprintStart })
             .Select(g => new { g.Key.Epic, g.Key.Sprint, g.Key.SprintStart, Total_Hours = Math.Round(g.Sum(x => x.Hours), 2) })
             .OrderBy(x => x.Sprint)
@@ -150,7 +158,7 @@ public class PlannerSimulator : SimulatorBase
         }
         wsVer.Cells.AutoFitColumns();
 
-        var sprintIndexes = AllocationHistory.Select(a => a.Sprint).Distinct().OrderBy(s => s).ToList();
+        var sprintIndexes = filteredAllocations.Select(a => a.Sprint).Distinct().OrderBy(s => s).ToList();
         if (sprintIndexes.Count == 0)
         {
             sprintIndexes.Add(0);
@@ -182,7 +190,7 @@ public class PlannerSimulator : SimulatorBase
             wsPS.Cells[row, col++].Value = end.ToString("yyyy-MM-dd");
             foreach (var resourceName in resources)
             {
-                double allocation = Math.Round(AllocationHistory
+                double allocation = Math.Round(filteredAllocations
                     .Where(a => a.Sprint == sprintIndex && a.Resource.Equals(resourceName, StringComparison.OrdinalIgnoreCase))
                     .Sum(a => a.Hours), 2);
                 double capacity = SprintCapacities[sprintIndex].TryGetValue(resourceName, out var rc) ? rc.Development : 0.0;

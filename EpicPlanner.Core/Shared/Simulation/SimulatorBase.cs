@@ -34,7 +34,7 @@ public abstract class SimulatorBase
         int _iSprintDays,
         int _iMaxSprintCount,
         int _iSprintOffset,
-        bool _OnlyDevelopmentEpics = false)
+        bool _bOnlyDevelopmentEpics = false)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
@@ -42,7 +42,7 @@ public abstract class SimulatorBase
         m_iSprintDays = _iSprintDays;
         m_iMaxSprintCount = _iMaxSprintCount;
         m_iSprintOffset = _iSprintOffset;
-        m_OnlyDevelopmentEpics = _OnlyDevelopmentEpics;
+        m_OnlyDevelopmentEpics = _bOnlyDevelopmentEpics;
 
         foreach (var epic in _Epics.Where(e => e.Remaining <= 0))
         {
