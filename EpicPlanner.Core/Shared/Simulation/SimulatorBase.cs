@@ -17,9 +17,11 @@ public abstract class SimulatorBase
     private readonly int m_iSprintDays;
     private readonly int m_iMaxSprintCount;
     private readonly int m_iSprintOffset;
+    private readonly bool m_OnlyDevelopmentEpics;
     private readonly Dictionary<string, DateTime> m_CompletedMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Allocation> m_Allocations = new();
     private readonly List<(int Sprint, string Resource, double Unused, string Reason)> m_Underutilization = new();
+    private readonly Dictionary<string, Epic> m_EpicsByName = new(StringComparer.OrdinalIgnoreCase);
 
     #endregion
 
@@ -31,7 +33,8 @@ public abstract class SimulatorBase
         DateTime _InitialSprintDate,
         int _iSprintDays,
         int _iMaxSprintCount,
-        int _iSprintOffset)
+        int _iSprintOffset,
+        bool _OnlyDevelopmentEpics = false)
     {
         m_Epics = _Epics;
         m_SprintCapacities = _SprintCapacities;
@@ -39,10 +42,19 @@ public abstract class SimulatorBase
         m_iSprintDays = _iSprintDays;
         m_iMaxSprintCount = _iMaxSprintCount;
         m_iSprintOffset = _iSprintOffset;
+        m_OnlyDevelopmentEpics = _OnlyDevelopmentEpics;
 
         foreach (var epic in _Epics.Where(e => e.Remaining <= 0))
         {
             m_CompletedMap[epic.Name] = epic.EndDate ?? _InitialSprintDate.AddDays(-1);
+        }
+
+        foreach (var epic in _Epics)
+        {
+            if (!m_EpicsByName.ContainsKey(epic.Name))
+            {
+                m_EpicsByName[epic.Name] = epic;
+            }
         }
     }
 
@@ -89,9 +101,11 @@ public abstract class SimulatorBase
             var activeDev = m_Epics
                 .Where(e => e.Remaining > 1e-6 && e.IsInDevelopment && DependencySatisfied(e, sprintStart))
                 .ToList();
-            var activeOthers = m_Epics
-                .Where(e => e.Remaining > 1e-6 && !e.IsInDevelopment && e.IsOtherAllowed && DependencySatisfied(e, sprintStart))
-                .ToList();
+            var activeOthers = m_OnlyDevelopmentEpics
+                ? new List<Epic>()
+                : m_Epics
+                    .Where(e => e.Remaining > 1e-6 && !e.IsInDevelopment && e.IsOtherAllowed && DependencySatisfied(e, sprintStart))
+                    .ToList();
 
             foreach (var activeSet in new[] { activeDev, activeOthers })
             {
@@ -262,6 +276,13 @@ public abstract class SimulatorBase
         {
             if (!m_CompletedMap.TryGetValue(dependency, out var depEnd))
             {
+                if (m_OnlyDevelopmentEpics &&
+                    m_EpicsByName.TryGetValue(dependency, out Epic? dependencyEpic) &&
+                    !dependencyEpic.IsInDevelopment)
+                {
+                    continue;
+                }
+
                 return false;
             }
 

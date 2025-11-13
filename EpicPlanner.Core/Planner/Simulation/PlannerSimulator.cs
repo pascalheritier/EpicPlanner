@@ -19,14 +19,16 @@ public class PlannerSimulator : SimulatorBase
         DateTime _InitialSprintDate,
         int _iSprintDays,
         int _iMaxSprintCount,
-        int _iSprintOffset)
+        int _iSprintOffset,
+        bool _OnlyDevelopmentEpics = false)
         : base(
             _Epics,
             _SprintCapacities,
             _InitialSprintDate,
             _iSprintDays,
             _iMaxSprintCount,
-            _iSprintOffset)
+            _iSprintOffset,
+            _OnlyDevelopmentEpics)
     {
     }
 
@@ -274,12 +276,12 @@ public class PlannerSimulator : SimulatorBase
     public void ExportGanttSprintBased(
         string _strOutputPngPath,
         EnumPlanningMode _enumMode,
-        bool _bIncludeNonInDevelopmentEpics = true)
+        bool _bOnlyDevelopmentEpics = false)
     {
         IEnumerable<Epic> epicSource = Epics
             .Where(e => e.StartDate.HasValue && e.EndDate.HasValue);
 
-        if (_enumMode == EnumPlanningMode.Standard && !_bIncludeNonInDevelopmentEpics)
+        if (_enumMode == EnumPlanningMode.Standard && _bOnlyDevelopmentEpics)
         {
             epicSource = epicSource.Where(e => e.IsInDevelopment);
         }
@@ -492,7 +494,7 @@ public class PlannerSimulator : SimulatorBase
                     ("Pending Analysis", BORDEAUX, false),
                     ("Analysis (no end date)", MAUVE, true)
                 }
-                : _bIncludeNonInDevelopmentEpics
+                : !_bOnlyDevelopmentEpics
                     ? new List<(string, SKColor, bool)>
                     {
                         ("In Development", LIGHT_GREEN, false),
