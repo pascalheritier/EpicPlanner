@@ -19,19 +19,33 @@ public class PlannerSimulator : SimulatorBase
         DateTime _InitialSprintDate,
         int _iSprintDays,
         int _iMaxSprintCount,
-        int _iSprintOffset)
+        int _iSprintOffset,
+        bool _bOnlyDevelopmentEpics = false)
         : base(
             _Epics,
             _SprintCapacities,
             _InitialSprintDate,
             _iSprintDays,
             _iMaxSprintCount,
-            _iSprintOffset)
+            _iSprintOffset,
+            _bOnlyDevelopmentEpics)
     {
     }
 
     public void ExportPlanningExcel(string _strOutputExcelFilePath)
     {
+        var reportedEpics = OnlyDevelopmentEpics
+            ? Epics.Where(e => e.IsInDevelopment).ToList()
+            : Epics.ToList();
+        HashSet<string>? reportedEpicNames = OnlyDevelopmentEpics
+            ? new HashSet<string>(reportedEpics.Select(e => e.Name), StringComparer.OrdinalIgnoreCase)
+            : null;
+        List<Allocation> filteredAllocations = reportedEpicNames == null
+            ? AllocationHistory.ToList()
+            : AllocationHistory
+                .Where(allocation => reportedEpicNames.Contains(allocation.Epic))
+                .ToList();
+
         using var package = new ExcelPackage();
         var wsFinal = package.Workbook.Worksheets.Add("FinalSchedule");
         var wsA1 = package.Workbook.Worksheets.Add("AllocationsByEpicAndSprint");
@@ -44,7 +58,7 @@ public class PlannerSimulator : SimulatorBase
         var wsAnal = package.Workbook.Worksheets.Add("AnalysisCapacities");
 
         WriteTable(wsFinal, new[] { "Epic", "State", "Priority", "Initial_Charge_h", "Allocated_total_h", "Remaining_after_h", "Start_date", "End_date" });
-        var finalRows = Epics.Select(e => new
+        var finalRows = reportedEpics.Select(e => new
         {
             Epic = e.Name,
             State = e.State,
@@ -90,7 +104,7 @@ public class PlannerSimulator : SimulatorBase
         }
         wsFinal.Cells.AutoFitColumns();
 
-        var aggA1 = AllocationHistory
+        var aggA1 = filteredAllocations
             .GroupBy(a => new { a.Epic, a.Sprint, a.Resource })
             .Select(g => new { g.Key.Epic, g.Key.Sprint, g.Key.Resource, Hours = Math.Round(g.Sum(x => x.Hours), 2) })
             .OrderBy(x => x.Sprint)
@@ -109,7 +123,7 @@ public class PlannerSimulator : SimulatorBase
         }
         wsA1.Cells.AutoFitColumns();
 
-        var aggA2 = AllocationHistory
+        var aggA2 = filteredAllocations
             .GroupBy(a => new { a.Epic, a.Sprint, a.SprintStart })
             .Select(g => new { g.Key.Epic, g.Key.Sprint, g.Key.SprintStart, Total_Hours = Math.Round(g.Sum(x => x.Hours), 2) })
             .OrderBy(x => x.Sprint)
@@ -129,7 +143,7 @@ public class PlannerSimulator : SimulatorBase
 
         WriteTable(wsVer, new[] { "Epic", "Initial_Charge_h", "Allocated_total_h", "Delta_h" });
         row = 2;
-        foreach (var e in Epics
+        foreach (var e in reportedEpics
                      .OrderBy(x => x.StartDate ?? DateTime.MaxValue)
                      .ThenBy(x => ExtractEpicKey(x.Name).Year)
                      .ThenBy(x => ExtractEpicKey(x.Name).Num))
@@ -144,7 +158,7 @@ public class PlannerSimulator : SimulatorBase
         }
         wsVer.Cells.AutoFitColumns();
 
-        var sprintIndexes = AllocationHistory.Select(a => a.Sprint).Distinct().OrderBy(s => s).ToList();
+        var sprintIndexes = filteredAllocations.Select(a => a.Sprint).Distinct().OrderBy(s => s).ToList();
         if (sprintIndexes.Count == 0)
         {
             sprintIndexes.Add(0);
@@ -176,7 +190,7 @@ public class PlannerSimulator : SimulatorBase
             wsPS.Cells[row, col++].Value = end.ToString("yyyy-MM-dd");
             foreach (var resourceName in resources)
             {
-                double allocation = Math.Round(AllocationHistory
+                double allocation = Math.Round(filteredAllocations
                     .Where(a => a.Sprint == sprintIndex && a.Resource.Equals(resourceName, StringComparison.OrdinalIgnoreCase))
                     .Sum(a => a.Hours), 2);
                 double capacity = SprintCapacities[sprintIndex].TryGetValue(resourceName, out var rc) ? rc.Development : 0.0;
@@ -236,7 +250,7 @@ public class PlannerSimulator : SimulatorBase
         WriteTable(wsOver, new[] { "Resource", "Total_wish_pct", "Over_100pct", "Details" });
         row = 2;
         var wishesByResource = new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var epic in Epics)
+        foreach (var epic in reportedEpics)
         {
             foreach (var wish in epic.Wishes)
             {
@@ -253,7 +267,7 @@ public class PlannerSimulator : SimulatorBase
             double totalPct = kv.Value.Sum();
             string details = string.Join(
                 "; ",
-                Epics
+                reportedEpics
                     .Where(e => e.Wishes.Any(w => w.Resource.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)))
                     .Select(e =>
                     {
@@ -274,12 +288,12 @@ public class PlannerSimulator : SimulatorBase
     public void ExportGanttSprintBased(
         string _strOutputPngPath,
         EnumPlanningMode _enumMode,
-        bool _bIncludeNonInDevelopmentEpics = true)
+        bool _bOnlyDevelopmentEpics = false)
     {
         IEnumerable<Epic> epicSource = Epics
             .Where(e => e.StartDate.HasValue && e.EndDate.HasValue);
 
-        if (_enumMode == EnumPlanningMode.Standard && !_bIncludeNonInDevelopmentEpics)
+        if (_enumMode == EnumPlanningMode.Standard && _bOnlyDevelopmentEpics)
         {
             epicSource = epicSource.Where(e => e.IsInDevelopment);
         }
@@ -492,7 +506,7 @@ public class PlannerSimulator : SimulatorBase
                     ("Pending Analysis", BORDEAUX, false),
                     ("Analysis (no end date)", MAUVE, true)
                 }
-                : _bIncludeNonInDevelopmentEpics
+                : !_bOnlyDevelopmentEpics
                     ? new List<(string, SKColor, bool)>
                     {
                         ("In Development", LIGHT_GREEN, false),

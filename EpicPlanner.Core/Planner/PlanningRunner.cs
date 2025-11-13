@@ -54,13 +54,15 @@ public class PlanningRunner
             return;
         }
 
-        PlannerSimulator standardSimulator = snapshot.CreatePlannerSimulator();
+        bool onlyDevelopmentEpics = m_AppConfiguration.PlannerConfiguration.OnlyDevelopmentEpics;
+        PlannerSimulator standardSimulator = snapshot.CreatePlannerSimulator(
+            _bOnlyDevelopmentEpics: onlyDevelopmentEpics);
         standardSimulator.Run();
         standardSimulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
         standardSimulator.ExportGanttSprintBased(
             m_AppConfiguration.FileConfiguration.OutputPngFilePath,
             EnumPlanningMode.Standard,
-            m_AppConfiguration.PlannerConfiguration.IncludeNonInDevelopmentEpicsInRealisationGantt);
+            onlyDevelopmentEpics);
     }
 
     #endregion
