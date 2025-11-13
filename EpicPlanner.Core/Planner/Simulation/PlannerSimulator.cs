@@ -34,6 +34,10 @@ public class PlannerSimulator : SimulatorBase
 
     public void ExportPlanningExcel(string _strOutputExcelFilePath)
     {
+        var reportedEpics = OnlyDevelopmentEpics
+            ? Epics.Where(e => e.IsInDevelopment).ToList()
+            : Epics.ToList();
+
         using var package = new ExcelPackage();
         var wsFinal = package.Workbook.Worksheets.Add("FinalSchedule");
         var wsA1 = package.Workbook.Worksheets.Add("AllocationsByEpicAndSprint");
@@ -46,7 +50,7 @@ public class PlannerSimulator : SimulatorBase
         var wsAnal = package.Workbook.Worksheets.Add("AnalysisCapacities");
 
         WriteTable(wsFinal, new[] { "Epic", "State", "Priority", "Initial_Charge_h", "Allocated_total_h", "Remaining_after_h", "Start_date", "End_date" });
-        var finalRows = Epics.Select(e => new
+        var finalRows = reportedEpics.Select(e => new
         {
             Epic = e.Name,
             State = e.State,
@@ -131,7 +135,7 @@ public class PlannerSimulator : SimulatorBase
 
         WriteTable(wsVer, new[] { "Epic", "Initial_Charge_h", "Allocated_total_h", "Delta_h" });
         row = 2;
-        foreach (var e in Epics
+        foreach (var e in reportedEpics
                      .OrderBy(x => x.StartDate ?? DateTime.MaxValue)
                      .ThenBy(x => ExtractEpicKey(x.Name).Year)
                      .ThenBy(x => ExtractEpicKey(x.Name).Num))
@@ -238,7 +242,7 @@ public class PlannerSimulator : SimulatorBase
         WriteTable(wsOver, new[] { "Resource", "Total_wish_pct", "Over_100pct", "Details" });
         row = 2;
         var wishesByResource = new Dictionary<string, List<double>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var epic in Epics)
+        foreach (var epic in reportedEpics)
         {
             foreach (var wish in epic.Wishes)
             {
@@ -255,7 +259,7 @@ public class PlannerSimulator : SimulatorBase
             double totalPct = kv.Value.Sum();
             string details = string.Join(
                 "; ",
-                Epics
+                reportedEpics
                     .Where(e => e.Wishes.Any(w => w.Resource.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)))
                     .Select(e =>
                     {

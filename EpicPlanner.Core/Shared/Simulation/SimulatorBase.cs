@@ -66,6 +66,7 @@ public abstract class SimulatorBase
     public DateTime InitialSprintDate => m_InitialSprintDate;
     public int SprintLengthDays => m_iSprintDays;
     public int MaxSprintCount => m_iMaxSprintCount;
+    protected bool OnlyDevelopmentEpics => m_OnlyDevelopmentEpics;
     protected int SprintOffset => m_iSprintOffset;
     protected IReadOnlyDictionary<int, Dictionary<string, ResourceCapacity>> SprintCapacities => m_SprintCapacities;
     protected IReadOnlyList<Allocation> AllocationHistory => m_Allocations;
