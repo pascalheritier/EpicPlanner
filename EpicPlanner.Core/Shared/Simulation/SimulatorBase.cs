@@ -17,7 +17,7 @@ public abstract class SimulatorBase
     private readonly int m_iSprintDays;
     private readonly int m_iMaxSprintCount;
     private readonly int m_iSprintOffset;
-    private readonly bool m_OnlyDevelopmentEpics;
+    private readonly bool m_bOnlyDevelopmentEpics;
     private readonly Dictionary<string, DateTime> m_CompletedMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Allocation> m_Allocations = new();
     private readonly List<(int Sprint, string Resource, double Unused, string Reason)> m_Underutilization = new();
@@ -42,7 +42,7 @@ public abstract class SimulatorBase
         m_iSprintDays = _iSprintDays;
         m_iMaxSprintCount = _iMaxSprintCount;
         m_iSprintOffset = _iSprintOffset;
-        m_OnlyDevelopmentEpics = _bOnlyDevelopmentEpics;
+        m_bOnlyDevelopmentEpics = _bOnlyDevelopmentEpics;
 
         foreach (var epic in _Epics.Where(e => e.Remaining <= 0))
         {
@@ -66,7 +66,7 @@ public abstract class SimulatorBase
     public DateTime InitialSprintDate => m_InitialSprintDate;
     public int SprintLengthDays => m_iSprintDays;
     public int MaxSprintCount => m_iMaxSprintCount;
-    protected bool OnlyDevelopmentEpics => m_OnlyDevelopmentEpics;
+    protected bool OnlyDevelopmentEpics => m_bOnlyDevelopmentEpics;
     protected int SprintOffset => m_iSprintOffset;
     protected IReadOnlyDictionary<int, Dictionary<string, ResourceCapacity>> SprintCapacities => m_SprintCapacities;
     protected IReadOnlyList<Allocation> AllocationHistory => m_Allocations;
@@ -102,7 +102,7 @@ public abstract class SimulatorBase
             var activeDev = m_Epics
                 .Where(e => e.Remaining > 1e-6 && e.IsInDevelopment && DependencySatisfied(e, sprintStart))
                 .ToList();
-            var activeOthers = m_OnlyDevelopmentEpics
+            var activeOthers = m_bOnlyDevelopmentEpics
                 ? new List<Epic>()
                 : m_Epics
                     .Where(e => e.Remaining > 1e-6 && !e.IsInDevelopment && e.IsOtherAllowed && DependencySatisfied(e, sprintStart))
@@ -277,7 +277,7 @@ public abstract class SimulatorBase
         {
             if (!m_CompletedMap.TryGetValue(dependency, out var depEnd))
             {
-                if (m_OnlyDevelopmentEpics &&
+                if (m_bOnlyDevelopmentEpics &&
                     m_EpicsByName.TryGetValue(dependency, out Epic? dependencyEpic) &&
                     !dependencyEpic.IsInDevelopment)
                 {
