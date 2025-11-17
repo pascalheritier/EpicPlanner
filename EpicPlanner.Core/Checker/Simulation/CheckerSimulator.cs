@@ -336,9 +336,9 @@ public class CheckerSimulator : SimulatorBase
             epicSheet.Cells[epicRow, 7].Formula = $"=IF(ISBLANK(B{epicRow}),\"\",B{epicRow}-E{epicRow})";
 
             string reliabilityFormula =
-                $"=IF(ISBLANK(B{epicRow}),\"\",IF(C{epicRow}<=0,IF(ABS(B{epicRow}-E{epicRow})<0.0001,1,0),MIN(1,MAX(0,1-ABS(F{epicRow}-E{epicRow})/C{epicRow}))))";
+                $"=IF(ISBLANK(B{epicRow}),\"\",IF(C{epicRow}<=0,MIN(1,MAX(0,1-ABS(F{epicRow}-E{epicRow})/MAX(ABS(F{epicRow}),0.0001))),MIN(1,MAX(0,1-ABS(F{epicRow}-E{epicRow})/C{epicRow}))))";
             string usageFormula =
-                $"=IF(C{epicRow}<=0,IF(ABS(B{epicRow}-E{epicRow})<0.0001,1,IF(D{epicRow}>0,2,0)),D{epicRow}/C{epicRow})";
+                $"=IF(C{epicRow}<=0,IF(D{epicRow}<=0,1,2),D{epicRow}/C{epicRow})";
 
             epicSheet.Cells[epicRow, 8].Formula = reliabilityFormula;
             epicSheet.Cells[epicRow, 9].Formula = usageFormula;
