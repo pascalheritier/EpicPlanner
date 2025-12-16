@@ -503,7 +503,7 @@ public class PlanningDataProvider
         Dictionary<string, ResourceCapacity> _Resources,
         StrategicPlanningConfiguration _Config)
     {
-        Dictionary<string, int> headers = ReadHeaders(_EpicWorksheet, 1);
+        Dictionary<string, int> headers = ReadHeaders(_EpicWorksheet, 2);
 
         int epicCol = GetColumn(headers, _Config.EpicNameColumn, "Epic name", "Epic");
         int versionCol = GetColumn(headers, _Config.VersionColumn);
@@ -519,7 +519,7 @@ public class PlanningDataProvider
         int rows = _EpicWorksheet.Dimension.End.Row;
         List<Epic> epics = new();
 
-        for (int row = 2; row <= rows; row++)
+        for (int row = 3; row <= rows; row++)
         {
             string epicName = epicCol > 0 ? _EpicWorksheet.Cells[row, epicCol].GetValue<string>()?.Trim() ?? string.Empty : string.Empty;
             if (string.IsNullOrWhiteSpace(epicName))
