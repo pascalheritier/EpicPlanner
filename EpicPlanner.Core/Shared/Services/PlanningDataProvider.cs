@@ -538,17 +538,40 @@ public class PlanningDataProvider
             double charge = trueEstimate > 0 ? trueEstimate : roughEstimate;
 
             string competenceRaw = competenceCol > 0 ? _EpicWorksheet.Cells[row, competenceCol].GetValue<string>() ?? string.Empty : string.Empty;
-            List<string> requiredCompetences = SplitCompetences(competenceRaw);
-            IReadOnlyList<string> matchingResources = FindMatchingResources(_Resources, requiredCompetences);
+            List<(string Competence, double Percentage)> competenceRequirements = ParseCompetenceRequirements(competenceRaw);
 
             var epic = new Epic(epicName, "development", charge, endAnalysis: null)
             {
                 Priority = EnumEpicPriority.Normal
             };
 
-            foreach (string resourceName in matchingResources)
+            if (competenceRequirements.Count == 0)
             {
-                epic.Wishes.Add(new Wish(resourceName, 1.0));
+                IReadOnlyList<string> allResources = FindMatchingResources(_Resources, Array.Empty<string>());
+                foreach (string resourceName in allResources)
+                {
+                    epic.Wishes.Add(new Wish(resourceName, 1.0));
+                }
+            }
+            else
+            {
+                foreach (var requirement in competenceRequirements)
+                {
+                    IReadOnlyList<string> matchingResources = FindMatchingResources(
+                        _Resources,
+                        new List<string> { requirement.Competence });
+
+                    if (matchingResources.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    double sharePerResource = requirement.Percentage / matchingResources.Count;
+                    foreach (string resourceName in matchingResources)
+                    {
+                        epic.Wishes.Add(new Wish(resourceName, sharePerResource));
+                    }
+                }
             }
 
             if (epic.Charge <= 0)
@@ -637,6 +660,62 @@ public class PlanningDataProvider
             .Select(s => s.Trim())
             .Where(s => s.Length > 0)
             .ToList();
+    }
+
+    private static List<(string Competence, double Percentage)> ParseCompetenceRequirements(string? _Raw)
+    {
+        List<string> tokens = SplitCompetences(_Raw);
+        if (tokens.Count == 0)
+        {
+            return new List<(string, double)>();
+        }
+
+        var requirements = new List<(string Competence, double Percentage)>();
+        double totalPct = 0;
+        foreach (string token in tokens)
+        {
+            string trimmed = token.Trim();
+            double pct = 0;
+
+            var match = System.Text.RegularExpressions.Regex.Match(trimmed, @"(.*?)(\d+)%\s*$");
+            string competenceName = trimmed;
+            if (match.Success)
+            {
+                competenceName = match.Groups[1].Value.Trim();
+                if (double.TryParse(match.Groups[2].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double parsedPct))
+                {
+                    pct = parsedPct / 100.0;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(competenceName))
+            {
+                continue;
+            }
+
+            if (pct <= 0 && tokens.Count == 1)
+            {
+                pct = 1.0;
+            }
+
+            requirements.Add((competenceName, pct));
+            totalPct += pct;
+        }
+
+        if (totalPct > 0 && Math.Abs(totalPct - 1.0) > 1e-6)
+        {
+            requirements = requirements
+                .Select(r => (r.Competence, r.Percentage / totalPct))
+                .ToList();
+        }
+        else if (totalPct <= 0)
+        {
+            requirements = requirements
+                .Select(r => (r.Competence, 1.0 / requirements.Count))
+                .ToList();
+        }
+
+        return requirements;
     }
 
     private static IReadOnlyList<string> FindMatchingResources(
