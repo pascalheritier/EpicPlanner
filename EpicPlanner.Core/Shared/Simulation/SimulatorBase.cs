@@ -95,7 +95,8 @@ public abstract class SimulatorBase
                     {
                         Development = kv.Value.Development,
                         Maintenance = kv.Value.Maintenance,
-                        Analysis = kv.Value.Analysis
+                        Analysis = kv.Value.Analysis,
+                        Competence = kv.Value.Competence
                     },
                     StringComparer.OrdinalIgnoreCase);
 
