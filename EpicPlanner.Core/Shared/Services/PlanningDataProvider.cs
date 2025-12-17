@@ -510,6 +510,7 @@ public class PlanningDataProvider
         int trueEstimateCol = GetColumn(headers, _Config.TrueEstimateColumn, "True estimate", "True estimate [h]");
         int roughEstimateCol = GetColumn(headers, _Config.RoughEstimateColumn, "Rough estimate", "Rough estimate [h]");
         int competenceCol = GetColumn(headers, _Config.EpicCompetenceColumn, "Competences");
+        int orderCol = GetColumn(headers, _Config.OrderColumn, "Ordre");
 
         if (epicCol <= 0)
         {
@@ -518,6 +519,7 @@ public class PlanningDataProvider
 
         int rows = _EpicWorksheet.Dimension.End.Row;
         List<Epic> epics = new();
+        List<(Epic Epic, int Order)> orderedEpics = new();
 
         for (int row = 3; row <= rows; row++)
         {
@@ -537,6 +539,8 @@ public class PlanningDataProvider
             double roughEstimate = roughEstimateCol > 0 ? ReadNumericCell(_EpicWorksheet.Cells[row, roughEstimateCol]) : 0.0;
             double charge = trueEstimate > 0 ? trueEstimate : roughEstimate;
 
+            int orderValue = ReadOrder(_EpicWorksheet, row, orderCol);
+
             string competenceRaw = competenceCol > 0 ? _EpicWorksheet.Cells[row, competenceCol].GetValue<string>() ?? string.Empty : string.Empty;
             List<(string Competence, double Percentage)> competenceRequirements = ParseCompetenceRequirements(competenceRaw);
 
@@ -544,6 +548,8 @@ public class PlanningDataProvider
             {
                 Priority = EnumEpicPriority.Normal
             };
+
+            orderedEpics.Add((epic, orderValue));
 
             if (competenceRequirements.Count == 0)
             {
@@ -584,6 +590,8 @@ public class PlanningDataProvider
             epics.Add(epic);
         }
 
+        EnforceOrderDependencies(orderedEpics);
+
         return epics;
     }
 
@@ -618,6 +626,72 @@ public class PlanningDataProvider
         }
 
         return 0;
+    }
+
+    private static int ReadOrder(ExcelWorksheet _Worksheet, int _iRow, int _iOrderCol)
+    {
+        if (_iOrderCol <= 0)
+        {
+            return 1;
+        }
+
+        object? value = _Worksheet.Cells[_iRow, _iOrderCol].Value;
+        if (value is null)
+        {
+            return 1;
+        }
+
+        switch (value)
+        {
+            case int i:
+                return i > 0 ? i : 1;
+            case long l:
+                return l > 0 ? (int)l : 1;
+            case double d when d > 0:
+                return (int)Math.Round(d);
+            case decimal m when m > 0:
+                return (int)Math.Round((double)m);
+            case string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed):
+                return parsed > 0 ? parsed : 1;
+            default:
+                return 1;
+        }
+    }
+
+    private static void EnforceOrderDependencies(List<(Epic Epic, int Order)> _OrderedEpics)
+    {
+        if (_OrderedEpics.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var current in _OrderedEpics)
+        {
+            if (current.Order <= 1)
+            {
+                continue;
+            }
+
+            var lowerOrderNames = _OrderedEpics
+                .Where(e => e.Order > 0 && e.Order < current.Order)
+                .Select(e => e.Epic.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (lowerOrderNames.Count == 0)
+            {
+                continue;
+            }
+
+            HashSet<string> deps = new(current.Epic.Dependencies, StringComparer.OrdinalIgnoreCase);
+            foreach (string depName in lowerOrderNames)
+            {
+                if (!deps.Contains(depName))
+                {
+                    current.Epic.Dependencies.Add(depName);
+                }
+            }
+        }
     }
 
     private static bool VersionMatches(string? _CellValue, string _Target)

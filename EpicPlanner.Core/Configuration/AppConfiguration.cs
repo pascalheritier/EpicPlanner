@@ -49,4 +49,5 @@ public class StrategicPlanningConfiguration
     public string RoughEstimateColumn { get; set; } = "Rough estimate [h]";
     public string EpicCompetenceColumn { get; set; } = "Compétences";
     public string ResourceCompetenceColumn { get; set; } = "Compétence";
+    public string OrderColumn { get; set; } = "Ordre";
 }
