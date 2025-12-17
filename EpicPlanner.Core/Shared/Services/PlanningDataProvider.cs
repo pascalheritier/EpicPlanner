@@ -544,6 +544,9 @@ public class PlanningDataProvider
         int roughEstimateCol = GetColumn(headers, _Config.RoughEstimateColumn, "Rough estimate", "Rough estimate [h]");
         int competenceCol = GetColumn(headers, _Config.EpicCompetenceColumn, "Competences");
         int orderCol = GetColumn(headers, _Config.OrderColumn, "Ordre");
+        int idCol = GetColumn(headers, _Config.IdColumn, "ID");
+        int dependencyCol = GetColumn(headers, _Config.DependencyColumn, "Dépendance");
+        int groupCol = GetColumn(headers, _Config.GroupColumn, "Groupe");
 
         if (epicCol <= 0)
         {
@@ -552,7 +555,7 @@ public class PlanningDataProvider
 
         int rows = _EpicWorksheet.Dimension.End.Row;
         List<Epic> epics = new();
-        List<(Epic Epic, int Order)> orderedEpics = new();
+        List<StrategicEpicMeta> strategicEpics = new();
 
         for (int row = 3; row <= rows; row++)
         {
@@ -579,6 +582,9 @@ public class PlanningDataProvider
             double charge = trueEstimate > 0 ? trueEstimate : roughEstimate;
 
             int orderValue = ReadOrder(_EpicWorksheet, row, orderCol);
+            int? epicId = ReadOptionalPositiveInt(_EpicWorksheet, row, idCol);
+            List<int> dependencyIds = ReadDependencyIds(_EpicWorksheet, row, dependencyCol);
+            string groupValue = groupCol > 0 ? _EpicWorksheet.Cells[row, groupCol].GetValue<string>()?.Trim() ?? string.Empty : string.Empty;
 
             string competenceRaw = competenceCol > 0 ? _EpicWorksheet.Cells[row, competenceCol].GetValue<string>() ?? string.Empty : string.Empty;
             List<(string Competence, double Percentage)> competenceRequirements = ParseCompetenceRequirements(competenceRaw);
@@ -588,7 +594,7 @@ public class PlanningDataProvider
                 Priority = EnumEpicPriority.Normal
             };
 
-            orderedEpics.Add((epic, orderValue));
+            strategicEpics.Add(new StrategicEpicMeta(epic, orderValue, groupValue, epicId, dependencyIds));
 
             if (competenceRequirements.Count == 0)
             {
@@ -629,7 +635,8 @@ public class PlanningDataProvider
             epics.Add(epic);
         }
 
-        EnforceOrderDependencies(orderedEpics);
+        ResolveDependenciesById(strategicEpics);
+        EnforceGroupOrderDependencies(strategicEpics);
 
         return epics;
     }
@@ -673,6 +680,61 @@ public class PlanningDataProvider
             _Value.Trim().Equals("done", StringComparison.OrdinalIgnoreCase);
     }
 
+    private sealed record StrategicEpicMeta(
+        Epic Epic,
+        int Order,
+        string Group,
+        int? Id,
+        List<int> DependencyIds);
+
+    private static int? ReadOptionalPositiveInt(ExcelWorksheet _Worksheet, int _iRow, int _iCol)
+    {
+        if (_iCol <= 0)
+        {
+            return null;
+        }
+
+        object? value = _Worksheet.Cells[_iRow, _iCol].Value;
+        switch (value)
+        {
+            case int i when i > 0:
+                return i;
+            case long l when l > 0:
+                return (int)l;
+            case double d when d > 0:
+                return (int)Math.Round(d);
+            case decimal m when m > 0:
+                return (int)Math.Round((double)m);
+            case string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) && parsed > 0:
+                return parsed;
+            default:
+                return null;
+        }
+    }
+
+    private static List<int> ReadDependencyIds(ExcelWorksheet _Worksheet, int _iRow, int _iDependencyCol)
+    {
+        if (_iDependencyCol <= 0)
+        {
+            return new List<int>();
+        }
+
+        string raw = _Worksheet.Cells[_iRow, _iDependencyCol].Text?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return new List<int>();
+        }
+
+        return raw
+            .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Trim())
+            .Where(part => int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+            .Select(part => int.Parse(part, NumberStyles.Integer, CultureInfo.InvariantCulture))
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+    }
+
     private static int ReadOrder(ExcelWorksheet _Worksheet, int _iRow, int _iOrderCol)
     {
         if (_iOrderCol <= 0)
@@ -703,22 +765,55 @@ public class PlanningDataProvider
         }
     }
 
-    private static void EnforceOrderDependencies(List<(Epic Epic, int Order)> _OrderedEpics)
+    private static void ResolveDependenciesById(List<StrategicEpicMeta> _StrategicEpics)
     {
-        if (_OrderedEpics.Count == 0)
+        if (_StrategicEpics.Count == 0)
         {
             return;
         }
 
-        foreach (var current in _OrderedEpics)
+        Dictionary<int, Epic> byId = new();
+        foreach (StrategicEpicMeta meta in _StrategicEpics)
+        {
+            if (meta.Id is int id && !byId.ContainsKey(id))
+            {
+                byId[id] = meta.Epic;
+            }
+        }
+
+        foreach (StrategicEpicMeta current in _StrategicEpics)
+        {
+            foreach (int depId in current.DependencyIds)
+            {
+                if (!byId.TryGetValue(depId, out Epic? dependency))
+                {
+                    continue;
+                }
+
+                if (!current.Epic.Dependencies.Contains(dependency.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    current.Epic.Dependencies.Add(dependency.Name);
+                }
+            }
+        }
+    }
+
+    private static void EnforceGroupOrderDependencies(List<StrategicEpicMeta> _StrategicEpics)
+    {
+        if (_StrategicEpics.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var current in _StrategicEpics)
         {
             if (current.Order <= 1)
             {
                 continue;
             }
 
-            var lowerOrderNames = _OrderedEpics
-                .Where(e => e.Order > 0 && e.Order < current.Order)
+            var lowerOrderNames = _StrategicEpics
+                .Where(e => e.Order > 0 && e.Order < current.Order && string.Equals(e.Group, current.Group, StringComparison.OrdinalIgnoreCase))
                 .Select(e => e.Epic.Name)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
