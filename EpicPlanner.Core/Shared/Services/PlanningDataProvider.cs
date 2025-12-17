@@ -329,6 +329,7 @@ public class PlanningDataProvider
                        headers.ContainsKey("Engineer") ? headers["Engineer"] : 1;
 
         int devCol = headers.ContainsKey("Heures Réalisation Epic") ? headers["Heures Réalisation Epic"] : 2;
+        int solutionsCol = headers.ContainsKey("Heures solutions") ? headers["Heures solutions"] : 0;
         int maintCol = headers.ContainsKey("Heures maintenance") ? headers["Heures maintenance"] : 0;
         int analCol = headers.ContainsKey("Heures Analyse Epic") ? headers["Heures Analyse Epic"] : 0;
         int competenceCol = 0;
@@ -348,10 +349,15 @@ public class PlanningDataProvider
             string name = _ResourceWorksheet.Cells[row, nameCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(name)) continue;
 
+            string? competence = competenceCol > 0 ? _ResourceWorksheet.Cells[row, competenceCol].GetValue<string>()?.Trim() : null;
+            double solutionsHours = solutionsCol > 0 ? _ResourceWorksheet.Cells[row, solutionsCol].GetValue<double>() : 0;
             double dev = _ResourceWorksheet.Cells[row, devCol].GetValue<double>();
+            if (!string.IsNullOrWhiteSpace(competence) && competence.Equals("solutions", StringComparison.OrdinalIgnoreCase) && solutionsCol > 0)
+            {
+                dev = solutionsHours;
+            }
             double maint = maintCol > 0 ? _ResourceWorksheet.Cells[row, maintCol].GetValue<double>() : 0;
             double anal = analCol > 0 ? _ResourceWorksheet.Cells[row, analCol].GetValue<double>() : 0;
-            string? competence = competenceCol > 0 ? _ResourceWorksheet.Cells[row, competenceCol].GetValue<string>()?.Trim() : null;
 
             dict[name] = new ResourceCapacity
             {
