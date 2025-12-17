@@ -50,4 +50,5 @@ public class StrategicPlanningConfiguration
     public string EpicCompetenceColumn { get; set; } = "Compétences";
     public string ResourceCompetenceColumn { get; set; } = "Compétence";
     public string OrderColumn { get; set; } = "Ordre";
+    public double AbsenceWeeksPerYear { get; set; } = 0;
 }

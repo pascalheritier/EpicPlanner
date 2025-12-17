@@ -93,14 +93,10 @@ public class PlanningDataProvider
         Dictionary<string, ResourceCapacity> resources = LoadResources(wsRes);
         List<Epic> epics = LoadStrategicEpics(wsEpics, resources, strategicConfig);
 
-        RedmineDataFetcher redmineDataFetcher = new(
-            m_AppConfiguration.RedmineConfiguration.ServerUrl,
-            m_AppConfiguration.RedmineConfiguration.ApiKey);
-
-        Dictionary<string, List<(DateTime, DateTime)>> absencesPerResource = await redmineDataFetcher.GetResourcesAbsencesAsync();
-        Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = AdjustCapacitiesForAbsences(
+        double absenceWeeksPerYear = strategicConfig.AbsenceWeeksPerYear;
+        Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = AdjustCapacitiesForFixedAbsenceWeeks(
             resources,
-            absencesPerResource,
+            absenceWeeksPerYear,
             m_AppConfiguration.PlannerConfiguration.Holidays);
 
         return new PlanningSnapshotComponents(
@@ -400,6 +396,43 @@ public class PlanningDataProvider
                         }
                     }
                 }
+                userSprintCapacity.RoundUpCapacity();
+                sprintCapacities[user] = userSprintCapacity;
+            }
+            adjustedCapacities[sprint] = sprintCapacities;
+        }
+
+        return adjustedCapacities;
+    }
+
+    private Dictionary<int, Dictionary<string, ResourceCapacity>> AdjustCapacitiesForFixedAbsenceWeeks(
+        Dictionary<string, ResourceCapacity> _BaseCapacities,
+        double _dAbsenceWeeksPerYear,
+        IEnumerable<DateTime> _Holidays)
+    {
+        double absenceRatio = _dAbsenceWeeksPerYear <= 0 ? 0 : Math.Min(1.0, _dAbsenceWeeksPerYear / 52.0);
+
+        Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = new();
+        for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
+        {
+            var sprintStart = m_InitialSprintStart.AddDays(sprint * m_iSprintDays).Date;
+            var sprintEnd = sprintStart.AddDays(m_iSprintDays - 1).Date;
+
+            int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, _Holidays);
+
+            var sprintCapacities = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var user in _BaseCapacities.Keys)
+            {
+                ResourceCapacity userSprintCapacity = new(_BaseCapacities[user]);
+                double scale = (double)workingDaysInSprint / m_iSprintCapacityDays;
+                userSprintCapacity.AdapteCapacityToScale(scale);
+
+                if (absenceRatio > 0)
+                {
+                    userSprintCapacity.AdapteCapacityToScale(1.0 - absenceRatio);
+                }
+
                 userSprintCapacity.RoundUpCapacity();
                 sprintCapacities[user] = userSprintCapacity;
             }
