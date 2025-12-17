@@ -535,6 +535,12 @@ public class PlanningDataProvider
                 continue;
             }
 
+            string trueEstimateText = trueEstimateCol > 0 ? _EpicWorksheet.Cells[row, trueEstimateCol].Text?.Trim() ?? string.Empty : string.Empty;
+            if (IsDoneIndicator(trueEstimateText))
+            {
+                continue;
+            }
+
             double trueEstimate = trueEstimateCol > 0 ? ReadNumericCell(_EpicWorksheet.Cells[row, trueEstimateCol]) : 0.0;
             double roughEstimate = roughEstimateCol > 0 ? ReadNumericCell(_EpicWorksheet.Cells[row, roughEstimateCol]) : 0.0;
             double charge = trueEstimate > 0 ? trueEstimate : roughEstimate;
@@ -626,6 +632,12 @@ public class PlanningDataProvider
         }
 
         return 0;
+    }
+
+    private static bool IsDoneIndicator(string _Value)
+    {
+        return !string.IsNullOrWhiteSpace(_Value) &&
+            _Value.Trim().Equals("done", StringComparison.OrdinalIgnoreCase);
     }
 
     private static int ReadOrder(ExcelWorksheet _Worksheet, int _iRow, int _iOrderCol)
