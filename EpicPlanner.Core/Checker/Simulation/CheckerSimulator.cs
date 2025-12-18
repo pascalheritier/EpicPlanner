@@ -71,29 +71,38 @@ public class CheckerSimulator : SimulatorBase
         WriteTable(worksheet, new[]
         {
             "Resource",
-            "Capacity_h",
+            "Capacity_epic_h",
             "Planned_epic_h",
-            "Planned_non_epic_h",
+            "Diff_epic_h",
+            "Capacity_maintenance_h",
+            "Planned_maintenance_h",
+            "Diff_maintenance_h",
+            "Capacity_total_h",
             "Planned_total_h",
-            "Diff_h"
+            "Diff_total_h"
         });
 
         int row = 2;
         var sprintCapacities = SprintCapacities[0];
         foreach (var resourceName in sprintCapacities.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
         {
-            double capacity = sprintCapacities[resourceName].Development;
+            double epicCapacity = sprintCapacities[resourceName].Development;
+            double maintenanceCapacity = sprintCapacities[resourceName].Maintenance;
             ResourcePlannedHoursBreakdown? plannedBreakdown = FindPlannedHoursForResource(resourceName);
             double plannedEpic = plannedBreakdown?.EpicHours ?? 0.0;
-            double plannedOutsideEpic = plannedBreakdown?.OutsideEpicHours ?? 0.0;
+            double plannedMaintenance = plannedBreakdown?.MaintenanceHours ?? 0.0;
             double plannedTotal = plannedBreakdown?.TotalHours ?? 0.0;
 
             worksheet.Cells[row, 1].Value = resourceName;
-            worksheet.Cells[row, 2].Value = capacity;
+            worksheet.Cells[row, 2].Value = epicCapacity;
             worksheet.Cells[row, 3].Value = plannedEpic;
-            worksheet.Cells[row, 4].Value = plannedOutsideEpic;
-            worksheet.Cells[row, 5].Value = plannedTotal;
-            worksheet.Cells[row, 6].Formula = $"=B{row}-E{row}";
+            worksheet.Cells[row, 4].Formula = $"=B{row}-C{row}";
+            worksheet.Cells[row, 5].Value = maintenanceCapacity;
+            worksheet.Cells[row, 6].Value = plannedMaintenance;
+            worksheet.Cells[row, 7].Formula = $"=E{row}-F{row}";
+            worksheet.Cells[row, 8].Formula = $"=B{row}+E{row}";
+            worksheet.Cells[row, 9].Value = plannedTotal;
+            worksheet.Cells[row, 10].Formula = $"=H{row}-I{row}";
 
             row++;
         }
@@ -103,16 +112,16 @@ public class CheckerSimulator : SimulatorBase
         if (row > 2)
         {
             int lastRow = row - 1;
-            var diffRange = worksheet.Cells[2, 6, lastRow, 6];
+            var diffRange = worksheet.Cells[2, 10, lastRow, 10];
 
             var condUnder = diffRange.ConditionalFormatting.AddExpression();
-            condUnder.Formula = "AND(F2<0,ABS(F2)/B2>0.05)";
+            condUnder.Formula = "AND(J2<0,ABS(J2)/H2>0.05)";
             condUnder.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
             condUnder.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightCoral);
             condUnder.Style.Font.Color.SetColor(System.Drawing.Color.DarkRed);
 
             var condOver = diffRange.ConditionalFormatting.AddExpression();
-            condOver.Formula = "AND(F2>0,F2/B2>0.15)";
+            condOver.Formula = "AND(J2>0,J2/H2>0.15)";
             condOver.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
             condOver.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightYellow);
             condOver.Style.Font.Color.SetColor(System.Drawing.Color.DarkOrange);

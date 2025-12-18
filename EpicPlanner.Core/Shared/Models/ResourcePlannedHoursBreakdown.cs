@@ -6,6 +6,8 @@ public class ResourcePlannedHoursBreakdown
 
     public double OutsideEpicHours { get; private set; }
 
+    public double MaintenanceHours => OutsideEpicHours;
+
     public double TotalHours => EpicHours + OutsideEpicHours;
 
     public void AddEpicHours(double _Hours)
