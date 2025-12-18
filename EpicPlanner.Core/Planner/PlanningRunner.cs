@@ -33,36 +33,54 @@ public class PlanningRunner
 
     public async Task RunAsync(EnumPlanningMode _enumMode)
     {
-        bool includePlannedHours = _enumMode == EnumPlanningMode.Standard;
-
-        PlannerPlanningSnapshot snapshot = await m_DataProvider.LoadPlannerSnapshotAsync(_bIncludePlannedHours: includePlannedHours);
-
-        if (_enumMode == EnumPlanningMode.Analysis)
+        switch (_enumMode)
         {
-            HashSet<string> analysisScope = BuildAnalysisScope(snapshot.Epics);
-            PlannerSimulator simulator = snapshot.CreatePlannerSimulator(epic => analysisScope.Contains(epic.Name));
-            simulator.Run();
-            AlignAnalysisEpicsToEndDates(
-                simulator.Epics,
-                simulator.InitialSprintDate,
-                simulator.SprintLengthDays,
-                simulator.MaxSprintCount);
+            case EnumPlanningMode.Analysis:
+            {
+                PlannerPlanningSnapshot snapshot = await m_DataProvider.LoadPlannerSnapshotAsync(_bIncludePlannedHours: false);
+                HashSet<string> analysisScope = BuildAnalysisScope(snapshot.Epics);
+                PlannerSimulator simulator = snapshot.CreatePlannerSimulator(epic => analysisScope.Contains(epic.Name));
+                simulator.Run();
+                AlignAnalysisEpicsToEndDates(
+                    simulator.Epics,
+                    simulator.InitialSprintDate,
+                    simulator.SprintLengthDays,
+                    simulator.MaxSprintCount);
 
-            simulator.ExportGanttSprintBased(
-                m_AppConfiguration.FileConfiguration.OutputPngFilePath,
-                EnumPlanningMode.Analysis);
-            return;
+                simulator.ExportGanttSprintBased(
+                    ResolvePngOutputPath(EnumPlanningMode.Analysis),
+                    EnumPlanningMode.Analysis);
+                return;
+            }
+
+            case EnumPlanningMode.StrategicEpic:
+            {
+                PlannerPlanningSnapshot snapshot = await m_DataProvider.LoadStrategicPlannerSnapshotAsync();
+                PlannerSimulator simulator = snapshot.CreatePlannerSimulator(_bOnlyDevelopmentEpics: true);
+                simulator.Run();
+                simulator.ExportPlanningExcel(ResolveExcelOutputPath(EnumPlanningMode.StrategicEpic));
+                simulator.ExportGanttSprintBased(
+                    ResolvePngOutputPath(EnumPlanningMode.StrategicEpic),
+                    EnumPlanningMode.StrategicEpic,
+                    true);
+                return;
+            }
+
+            default:
+            {
+                PlannerPlanningSnapshot snapshot = await m_DataProvider.LoadPlannerSnapshotAsync(_bIncludePlannedHours: true);
+                bool onlyDevelopmentEpics = m_AppConfiguration.PlannerConfiguration.OnlyDevelopmentEpics;
+                PlannerSimulator simulator = snapshot.CreatePlannerSimulator(
+                    _bOnlyDevelopmentEpics: onlyDevelopmentEpics);
+                simulator.Run();
+                simulator.ExportPlanningExcel(ResolveExcelOutputPath(EnumPlanningMode.Standard));
+                simulator.ExportGanttSprintBased(
+                    ResolvePngOutputPath(EnumPlanningMode.Standard),
+                    EnumPlanningMode.Standard,
+                    onlyDevelopmentEpics);
+                return;
+            }
         }
-
-        bool onlyDevelopmentEpics = m_AppConfiguration.PlannerConfiguration.OnlyDevelopmentEpics;
-        PlannerSimulator standardSimulator = snapshot.CreatePlannerSimulator(
-            _bOnlyDevelopmentEpics: onlyDevelopmentEpics);
-        standardSimulator.Run();
-        standardSimulator.ExportPlanningExcel(m_AppConfiguration.FileConfiguration.OutputFilePath);
-        standardSimulator.ExportGanttSprintBased(
-            m_AppConfiguration.FileConfiguration.OutputPngFilePath,
-            EnumPlanningMode.Standard,
-            onlyDevelopmentEpics);
     }
 
     #endregion
@@ -111,6 +129,22 @@ public class PlanningRunner
         }
 
         return included;
+    }
+
+    private string ResolveExcelOutputPath(EnumPlanningMode _enumMode)
+    {
+        return _enumMode == EnumPlanningMode.StrategicEpic &&
+            !string.IsNullOrWhiteSpace(m_AppConfiguration.FileConfiguration.StrategicOutputFilePath)
+            ? m_AppConfiguration.FileConfiguration.StrategicOutputFilePath!
+            : m_AppConfiguration.FileConfiguration.OutputFilePath;
+    }
+
+    private string ResolvePngOutputPath(EnumPlanningMode _enumMode)
+    {
+        return _enumMode == EnumPlanningMode.StrategicEpic &&
+            !string.IsNullOrWhiteSpace(m_AppConfiguration.FileConfiguration.StrategicOutputPngFilePath)
+            ? m_AppConfiguration.FileConfiguration.StrategicOutputPngFilePath!
+            : m_AppConfiguration.FileConfiguration.OutputPngFilePath;
     }
 
     private static void AlignAnalysisEpicsToEndDates(

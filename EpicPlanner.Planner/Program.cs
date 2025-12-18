@@ -32,11 +32,15 @@ internal class Program
 
             AppConfiguration config = serviceProvider.GetRequiredService<AppConfiguration>();
             LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, "✅ Planning completed");
-            if (mode == EnumPlanningMode.Standard)
+            if (mode == EnumPlanningMode.Standard || mode == EnumPlanningMode.StrategicEpic)
             {
-                LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"Excel: {Path.GetFullPath(config.FileConfiguration.OutputFilePath)}");
+                LogManager.GetCurrentClassLogger().Log(
+                    NLog.LogLevel.Info,
+                    $"Excel: {Path.GetFullPath(ResolveExcelOutputPath(config, mode))}");
             }
-            LogManager.GetCurrentClassLogger().Log(NLog.LogLevel.Info, $"Gantt: {Path.GetFullPath(config.FileConfiguration.OutputPngFilePath)}");
+            LogManager.GetCurrentClassLogger().Log(
+                NLog.LogLevel.Info,
+                $"Gantt: {Path.GetFullPath(ResolvePngOutputPath(config, mode))}");
         }
         catch (Exception ex)
         {
@@ -113,6 +117,7 @@ internal class Program
         Console.WriteLine("Select the planning mode:");
         Console.WriteLine("  1 - Standard planning (sprint planning)");
         Console.WriteLine("  2 - Analysis planning (strategic planning)");
+        Console.WriteLine("  3 - Strategic epic planning (version-based epic scheduling)");
 
         while (true)
         {
@@ -129,7 +134,7 @@ internal class Program
                 return parsed;
             }
 
-            Console.WriteLine("Invalid selection. Please type '1' for Standard planning or '2' for Analysis planning.");
+            Console.WriteLine("Invalid selection. Please type '1' for Standard planning, '2' for Analysis planning, or '3' for Strategic epic planning.");
         }
     }
 
@@ -162,6 +167,32 @@ internal class Program
             return true;
         }
 
+        if (value.Equals("3", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("strategic-epic", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("epic", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("themes", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("strategic-epic-planning", StringComparison.OrdinalIgnoreCase))
+        {
+            _enumMode = EnumPlanningMode.StrategicEpic;
+            return true;
+        }
+
         return false;
+    }
+
+    private static string ResolveExcelOutputPath(AppConfiguration _Config, EnumPlanningMode _Mode)
+    {
+        return _Mode == EnumPlanningMode.StrategicEpic &&
+            !string.IsNullOrWhiteSpace(_Config.FileConfiguration.StrategicOutputFilePath)
+            ? _Config.FileConfiguration.StrategicOutputFilePath!
+            : _Config.FileConfiguration.OutputFilePath;
+    }
+
+    private static string ResolvePngOutputPath(AppConfiguration _Config, EnumPlanningMode _Mode)
+    {
+        return _Mode == EnumPlanningMode.StrategicEpic &&
+            !string.IsNullOrWhiteSpace(_Config.FileConfiguration.StrategicOutputPngFilePath)
+            ? _Config.FileConfiguration.StrategicOutputPngFilePath!
+            : _Config.FileConfiguration.OutputPngFilePath;
     }
 }

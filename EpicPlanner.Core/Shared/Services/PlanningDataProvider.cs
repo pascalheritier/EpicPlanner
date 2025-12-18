@@ -48,6 +48,19 @@ public class PlanningDataProvider
             m_AppConfiguration.PlannerConfiguration.InitialSprintNumber);
     }
 
+    public async Task<PlannerPlanningSnapshot> LoadStrategicPlannerSnapshotAsync()
+    {
+        PlanningSnapshotComponents components = await LoadStrategicComponentsAsync();
+
+        return new PlannerPlanningSnapshot(
+            components.Epics,
+            components.AdjustedCapacities,
+            m_InitialSprintStart,
+            m_iSprintDays,
+            m_AppConfiguration.PlannerConfiguration.MaxSprintCount,
+            m_AppConfiguration.PlannerConfiguration.InitialSprintNumber);
+    }
+
     public async Task<CheckerPlanningSnapshot> LoadCheckerSnapshotAsync()
     {
         PlanningSnapshotComponents components = await LoadComponentsAsync(_bIncludePlannedHours: true);
@@ -62,6 +75,36 @@ public class PlanningDataProvider
             components.PlannedHours,
             components.EpicSummaries,
             components.PlannedCapacityByEpic);
+    }
+
+    private async Task<PlanningSnapshotComponents> LoadStrategicComponentsAsync()
+    {
+        using ExcelPackage package = new(new FileInfo(m_AppConfiguration.FileConfiguration.InputFilePath));
+        StrategicPlanningConfiguration strategicConfig = m_AppConfiguration.StrategicPlanningConfiguration;
+
+        ExcelWorksheet wsEpics = package.Workbook.Worksheets[strategicConfig.EpicsSheetName]
+            ?? package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputEpicsSheetName]
+            ?? throw new NullReferenceException($"Worksheet '{strategicConfig.EpicsSheetName}' could not be found.");
+
+        ExcelWorksheet wsRes = package.Workbook.Worksheets[strategicConfig.ResourcesSheetName]
+            ?? package.Workbook.Worksheets[m_AppConfiguration.FileConfiguration.InputResourcesSheetName]
+            ?? throw new NullReferenceException($"Worksheet '{strategicConfig.ResourcesSheetName}' could not be found.");
+
+        Dictionary<string, ResourceCapacity> resources = LoadResources(wsRes);
+        List<Epic> epics = LoadStrategicEpics(wsEpics, resources, strategicConfig);
+
+        double absenceWeeksPerYear = strategicConfig.AbsenceWeeksPerYear;
+        Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = AdjustCapacitiesForFixedAbsenceWeeks(
+            resources,
+            absenceWeeksPerYear,
+            m_AppConfiguration.PlannerConfiguration.Holidays);
+
+        return new PlanningSnapshotComponents(
+            epics,
+            adjustedCapacities,
+            new Dictionary<string, ResourcePlannedHoursBreakdown>(StringComparer.OrdinalIgnoreCase),
+            new List<SprintEpicSummary>(),
+            new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase));
     }
 
     private async Task<PlanningSnapshotComponents> LoadComponentsAsync(bool _bIncludePlannedHours)
@@ -286,8 +329,19 @@ public class PlanningDataProvider
                        headers.ContainsKey("Engineer") ? headers["Engineer"] : 1;
 
         int devCol = headers.ContainsKey("Heures Réalisation Epic") ? headers["Heures Réalisation Epic"] : 2;
+        int solutionsCol = headers.ContainsKey("Heures solutions") ? headers["Heures solutions"] : 0;
         int maintCol = headers.ContainsKey("Heures maintenance") ? headers["Heures maintenance"] : 0;
         int analCol = headers.ContainsKey("Heures Analyse Epic") ? headers["Heures Analyse Epic"] : 0;
+        int competenceCol = 0;
+
+        if (headers.TryGetValue(m_AppConfiguration.StrategicPlanningConfiguration.ResourceCompetenceColumn, out int competenceIndex))
+        {
+            competenceCol = competenceIndex;
+        }
+        else if (headers.TryGetValue("Compétence", out int competenceFallback))
+        {
+            competenceCol = competenceFallback;
+        }
 
         var dict = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
         for (int row = 3; row <= rows; row++)
@@ -295,7 +349,13 @@ public class PlanningDataProvider
             string name = _ResourceWorksheet.Cells[row, nameCol].GetValue<string>()?.Trim();
             if (string.IsNullOrWhiteSpace(name)) continue;
 
+            string? competence = competenceCol > 0 ? _ResourceWorksheet.Cells[row, competenceCol].GetValue<string>()?.Trim() : null;
+            double solutionsHours = solutionsCol > 0 ? _ResourceWorksheet.Cells[row, solutionsCol].GetValue<double>() : 0;
             double dev = _ResourceWorksheet.Cells[row, devCol].GetValue<double>();
+            if (!string.IsNullOrWhiteSpace(competence) && competence.Equals("solutions", StringComparison.OrdinalIgnoreCase) && solutionsCol > 0)
+            {
+                dev = solutionsHours;
+            }
             double maint = maintCol > 0 ? _ResourceWorksheet.Cells[row, maintCol].GetValue<double>() : 0;
             double anal = analCol > 0 ? _ResourceWorksheet.Cells[row, analCol].GetValue<double>() : 0;
 
@@ -303,7 +363,8 @@ public class PlanningDataProvider
             {
                 Development = dev,
                 Maintenance = maint,
-                Analysis = anal
+                Analysis = anal,
+                Competence = competence
             };
         }
         return dict;
@@ -341,6 +402,43 @@ public class PlanningDataProvider
                         }
                     }
                 }
+                userSprintCapacity.RoundUpCapacity();
+                sprintCapacities[user] = userSprintCapacity;
+            }
+            adjustedCapacities[sprint] = sprintCapacities;
+        }
+
+        return adjustedCapacities;
+    }
+
+    private Dictionary<int, Dictionary<string, ResourceCapacity>> AdjustCapacitiesForFixedAbsenceWeeks(
+        Dictionary<string, ResourceCapacity> _BaseCapacities,
+        double _dAbsenceWeeksPerYear,
+        IEnumerable<DateTime> _Holidays)
+    {
+        double absenceRatio = _dAbsenceWeeksPerYear <= 0 ? 0 : Math.Min(1.0, _dAbsenceWeeksPerYear / 52.0);
+
+        Dictionary<int, Dictionary<string, ResourceCapacity>> adjustedCapacities = new();
+        for (int sprint = 0; sprint < m_AppConfiguration.PlannerConfiguration.MaxSprintCount; sprint++)
+        {
+            var sprintStart = m_InitialSprintStart.AddDays(sprint * m_iSprintDays).Date;
+            var sprintEnd = sprintStart.AddDays(m_iSprintDays - 1).Date;
+
+            int workingDaysInSprint = BusinessCalendar.CountWorkingDays(sprintStart, sprintEnd, _Holidays);
+
+            var sprintCapacities = new Dictionary<string, ResourceCapacity>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var user in _BaseCapacities.Keys)
+            {
+                ResourceCapacity userSprintCapacity = new(_BaseCapacities[user]);
+                double scale = (double)workingDaysInSprint / m_iSprintCapacityDays;
+                userSprintCapacity.AdapteCapacityToScale(scale);
+
+                if (absenceRatio > 0)
+                {
+                    userSprintCapacity.AdapteCapacityToScale(1.0 - absenceRatio);
+                }
+
                 userSprintCapacity.RoundUpCapacity();
                 sprintCapacities[user] = userSprintCapacity;
             }
@@ -438,6 +536,451 @@ public class PlanningDataProvider
 
         return epics;
     } 
+
+    private List<Epic> LoadStrategicEpics(
+        ExcelWorksheet _EpicWorksheet,
+        Dictionary<string, ResourceCapacity> _Resources,
+        StrategicPlanningConfiguration _Config)
+    {
+        Dictionary<string, int> headers = ReadHeaders(_EpicWorksheet, 2);
+
+        int epicCol = GetColumn(headers, _Config.EpicNameColumn, "Epic name", "Epic");
+        int versionCol = GetColumn(headers, _Config.VersionColumn);
+        int trueEstimateCol = GetColumn(headers, _Config.TrueEstimateColumn, "True estimate", "True estimate [h]");
+        int roughEstimateCol = GetColumn(headers, _Config.RoughEstimateColumn, "Rough estimate", "Rough estimate [h]");
+        int competenceCol = GetColumn(headers, _Config.EpicCompetenceColumn, "Competences");
+        int orderCol = GetColumn(headers, _Config.OrderColumn, "Ordre");
+        int idCol = GetColumn(headers, _Config.IdColumn, "ID");
+        int dependencyCol = GetColumn(headers, _Config.DependencyColumn, "Dépendance");
+        int groupCol = GetColumn(headers, _Config.GroupColumn, "Groupe");
+
+        if (epicCol <= 0)
+        {
+            epicCol = 1;
+        }
+
+        int rows = _EpicWorksheet.Dimension.End.Row;
+        List<Epic> epics = new();
+        List<StrategicEpicMeta> strategicEpics = new();
+
+        for (int row = 3; row <= rows; row++)
+        {
+            string epicName = epicCol > 0 ? _EpicWorksheet.Cells[row, epicCol].GetValue<string>()?.Trim() ?? string.Empty : string.Empty;
+            if (string.IsNullOrWhiteSpace(epicName))
+            {
+                continue;
+            }
+
+            string versionValue = versionCol > 0 ? _EpicWorksheet.Cells[row, versionCol].GetValue<string>()?.Trim() ?? string.Empty : string.Empty;
+            if (versionCol > 0 && !VersionMatches(versionValue, _Config.TargetVersionName))
+            {
+                continue;
+            }
+
+            string trueEstimateText = trueEstimateCol > 0 ? _EpicWorksheet.Cells[row, trueEstimateCol].Text?.Trim() ?? string.Empty : string.Empty;
+            if (IsDoneIndicator(trueEstimateText))
+            {
+                continue;
+            }
+
+            double trueEstimate = trueEstimateCol > 0 ? ReadNumericCell(_EpicWorksheet.Cells[row, trueEstimateCol]) : 0.0;
+            double roughEstimate = roughEstimateCol > 0 ? ReadNumericCell(_EpicWorksheet.Cells[row, roughEstimateCol]) : 0.0;
+            double charge = trueEstimate > 0 ? trueEstimate : roughEstimate;
+
+            int orderValue = ReadOrder(_EpicWorksheet, row, orderCol);
+            int? epicId = ReadOptionalPositiveInt(_EpicWorksheet, row, idCol);
+            List<int> dependencyIds = ReadDependencyIds(_EpicWorksheet, row, dependencyCol);
+            string groupValue = groupCol > 0 ? _EpicWorksheet.Cells[row, groupCol].GetValue<string>()?.Trim() ?? string.Empty : string.Empty;
+
+            string competenceRaw = competenceCol > 0 ? _EpicWorksheet.Cells[row, competenceCol].GetValue<string>() ?? string.Empty : string.Empty;
+            List<(string Competence, double Percentage)> competenceRequirements = ParseCompetenceRequirements(competenceRaw);
+
+            var epic = new Epic(epicName, "development", charge, endAnalysis: null)
+            {
+                Priority = EnumEpicPriority.Normal
+            };
+
+            strategicEpics.Add(new StrategicEpicMeta(epic, orderValue, groupValue, epicId, dependencyIds));
+
+            if (competenceRequirements.Count == 0)
+            {
+                IReadOnlyList<string> allResources = FindMatchingResources(_Resources, Array.Empty<string>());
+                foreach (string resourceName in allResources)
+                {
+                    epic.Wishes.Add(new Wish(resourceName, 1.0));
+                }
+            }
+            else
+            {
+                foreach (var requirement in competenceRequirements)
+                {
+                    IReadOnlyList<string> matchingResources = FindMatchingResources(
+                        _Resources,
+                        new List<string> { requirement.Competence });
+
+                    if (matchingResources.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    double sharePerResource = requirement.Percentage / matchingResources.Count;
+                    foreach (string resourceName in matchingResources)
+                    {
+                        epic.Wishes.Add(new Wish(resourceName, sharePerResource));
+                    }
+                }
+            }
+
+            if (epic.Charge <= 0)
+            {
+                epic.Remaining = 0;
+                epic.StartDate = m_InitialSprintStart;
+                epic.EndDate = m_InitialSprintStart;
+            }
+
+            epics.Add(epic);
+        }
+
+        ResolveDependenciesById(strategicEpics);
+        EnforceGroupOrderDependencies(strategicEpics);
+
+        return epics;
+    }
+
+    private static Dictionary<string, int> ReadHeaders(ExcelWorksheet _Worksheet, int _iHeaderRow)
+    {
+        var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int c = 1; c <= _Worksheet.Dimension.End.Column; c++)
+        {
+            string? header = _Worksheet.Cells[_iHeaderRow, c].GetValue<string>()?.Trim();
+            if (!string.IsNullOrWhiteSpace(header))
+            {
+                headers[header] = c;
+            }
+        }
+
+        return headers;
+    }
+
+    private static int GetColumn(Dictionary<string, int> _Headers, params string[] _Candidates)
+    {
+        foreach (string candidate in _Candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                continue;
+            }
+
+            if (_Headers.TryGetValue(candidate, out int col))
+            {
+                return col;
+            }
+        }
+
+        return 0;
+    }
+
+    private static bool IsDoneIndicator(string _Value)
+    {
+        return !string.IsNullOrWhiteSpace(_Value) &&
+            _Value.Trim().Equals("done", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed record StrategicEpicMeta(
+        Epic Epic,
+        int Order,
+        string Group,
+        int? Id,
+        List<int> DependencyIds);
+
+    private static int? ReadOptionalPositiveInt(ExcelWorksheet _Worksheet, int _iRow, int _iCol)
+    {
+        if (_iCol <= 0)
+        {
+            return null;
+        }
+
+        object? value = _Worksheet.Cells[_iRow, _iCol].Value;
+        switch (value)
+        {
+            case int i when i > 0:
+                return i;
+            case long l when l > 0:
+                return (int)l;
+            case double d when d > 0:
+                return (int)Math.Round(d);
+            case decimal m when m > 0:
+                return (int)Math.Round((double)m);
+            case string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) && parsed > 0:
+                return parsed;
+            default:
+                return null;
+        }
+    }
+
+    private static List<int> ReadDependencyIds(ExcelWorksheet _Worksheet, int _iRow, int _iDependencyCol)
+    {
+        if (_iDependencyCol <= 0)
+        {
+            return new List<int>();
+        }
+
+        string raw = _Worksheet.Cells[_iRow, _iDependencyCol].Text?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return new List<int>();
+        }
+
+        return raw
+            .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Trim())
+            .Where(part => int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+            .Select(part => int.Parse(part, NumberStyles.Integer, CultureInfo.InvariantCulture))
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+    }
+
+    private static int ReadOrder(ExcelWorksheet _Worksheet, int _iRow, int _iOrderCol)
+    {
+        if (_iOrderCol <= 0)
+        {
+            return 1;
+        }
+
+        object? value = _Worksheet.Cells[_iRow, _iOrderCol].Value;
+        if (value is null)
+        {
+            return 1;
+        }
+
+        switch (value)
+        {
+            case int i:
+                return i > 0 ? i : 1;
+            case long l:
+                return l > 0 ? (int)l : 1;
+            case double d when d > 0:
+                return (int)Math.Round(d);
+            case decimal m when m > 0:
+                return (int)Math.Round((double)m);
+            case string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed):
+                return parsed > 0 ? parsed : 1;
+            default:
+                return 1;
+        }
+    }
+
+    private static void ResolveDependenciesById(List<StrategicEpicMeta> _StrategicEpics)
+    {
+        if (_StrategicEpics.Count == 0)
+        {
+            return;
+        }
+
+        Dictionary<int, Epic> byId = new();
+        foreach (StrategicEpicMeta meta in _StrategicEpics)
+        {
+            if (meta.Id is int id && !byId.ContainsKey(id))
+            {
+                byId[id] = meta.Epic;
+            }
+        }
+
+        foreach (StrategicEpicMeta current in _StrategicEpics)
+        {
+            foreach (int depId in current.DependencyIds)
+            {
+                if (!byId.TryGetValue(depId, out Epic? dependency))
+                {
+                    continue;
+                }
+
+                if (!current.Epic.Dependencies.Contains(dependency.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    current.Epic.Dependencies.Add(dependency.Name);
+                }
+            }
+        }
+    }
+
+    private static void EnforceGroupOrderDependencies(List<StrategicEpicMeta> _StrategicEpics)
+    {
+        if (_StrategicEpics.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var current in _StrategicEpics)
+        {
+            if (current.Order <= 1)
+            {
+                continue;
+            }
+
+            var lowerOrderNames = _StrategicEpics
+                .Where(e => e.Order > 0 && e.Order < current.Order && string.Equals(e.Group, current.Group, StringComparison.OrdinalIgnoreCase))
+                .Select(e => e.Epic.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (lowerOrderNames.Count == 0)
+            {
+                continue;
+            }
+
+            HashSet<string> deps = new(current.Epic.Dependencies, StringComparer.OrdinalIgnoreCase);
+            foreach (string depName in lowerOrderNames)
+            {
+                if (!deps.Contains(depName))
+                {
+                    current.Epic.Dependencies.Add(depName);
+                }
+            }
+        }
+    }
+
+    private static bool VersionMatches(string? _CellValue, string _Target)
+    {
+        if (string.IsNullOrWhiteSpace(_Target))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(_CellValue))
+        {
+            return false;
+        }
+
+        if (_CellValue.Trim().Equals(_Target, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (string token in _CellValue.Split(new[] { ',', ';', '/', '|' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (token.Trim().Equals(_Target, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static List<string> SplitCompetences(string? _Raw)
+    {
+        if (string.IsNullOrWhiteSpace(_Raw))
+        {
+            return new List<string>();
+        }
+
+        return _Raw
+            .Split(new[] { ',', ';', '/', '|' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0)
+            .ToList();
+    }
+
+    private static List<(string Competence, double Percentage)> ParseCompetenceRequirements(string? _Raw)
+    {
+        List<string> tokens = SplitCompetences(_Raw);
+        if (tokens.Count == 0)
+        {
+            return new List<(string, double)>();
+        }
+
+        var requirements = new List<(string Competence, double Percentage)>();
+        double totalPct = 0;
+        foreach (string token in tokens)
+        {
+            string trimmed = token.Trim();
+            double pct = 0;
+
+            var match = System.Text.RegularExpressions.Regex.Match(trimmed, @"(.*?)(\d+)%\s*$");
+            string competenceName = trimmed;
+            if (match.Success)
+            {
+                competenceName = match.Groups[1].Value.Trim();
+                if (double.TryParse(match.Groups[2].Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double parsedPct))
+                {
+                    pct = parsedPct / 100.0;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(competenceName))
+            {
+                continue;
+            }
+
+            if (pct <= 0 && tokens.Count == 1)
+            {
+                pct = 1.0;
+            }
+
+            requirements.Add((competenceName, pct));
+            totalPct += pct;
+        }
+
+        if (totalPct > 0 && Math.Abs(totalPct - 1.0) > 1e-6)
+        {
+            requirements = requirements
+                .Select(r => (r.Competence, r.Percentage / totalPct))
+                .ToList();
+        }
+        else if (totalPct <= 0)
+        {
+            requirements = requirements
+                .Select(r => (r.Competence, 1.0 / requirements.Count))
+                .ToList();
+        }
+
+        return requirements;
+    }
+
+    private static IReadOnlyList<string> FindMatchingResources(
+        Dictionary<string, ResourceCapacity> _Resources,
+        IReadOnlyList<string> _RequiredCompetences)
+    {
+        if (_RequiredCompetences.Count == 0)
+        {
+            return _Resources.Keys.ToList();
+        }
+
+        List<string> matches = new();
+        foreach (var kv in _Resources)
+        {
+            List<string> resourceCompetences = SplitCompetences(kv.Value.Competence);
+            if (resourceCompetences.Count == 0)
+            {
+                continue;
+            }
+
+            bool hasMatch = resourceCompetences.Any(rc => _RequiredCompetences.Any(req => req.Equals(rc, StringComparison.OrdinalIgnoreCase)));
+            if (hasMatch)
+            {
+                matches.Add(kv.Key);
+            }
+        }
+
+        return matches.Count > 0 ? matches : _Resources.Keys.ToList();
+    }
+
+    private static double ReadNumericCell(OfficeOpenXml.ExcelRange _Cell)
+    {
+        object? value = _Cell.Value;
+        return value switch
+        {
+            null => 0.0,
+            double d => d,
+            int i => i,
+            long l => l,
+            decimal m => (double)m,
+            float f => f,
+            string s when double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out double parsed) => parsed,
+            _ => 0.0
+        };
+    }
 
     #endregion
 }

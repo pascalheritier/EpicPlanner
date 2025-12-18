@@ -11,11 +11,13 @@ public class ResourceCapacity
         Development = originalCapacity.Development;
         Maintenance = originalCapacity.Maintenance;
         Analysis = originalCapacity.Analysis;
+        Competence = originalCapacity.Competence;
     }
 
     public double Development { get; set; }
     public double Maintenance { get; set; }
     public double Analysis { get; set; }
+    public string? Competence { get; set; }
 
     public void AdapteCapacityToScale(double scale)
     {

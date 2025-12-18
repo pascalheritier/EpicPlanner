@@ -293,7 +293,7 @@ public class PlannerSimulator : SimulatorBase
         IEnumerable<Epic> epicSource = Epics
             .Where(e => e.StartDate.HasValue && e.EndDate.HasValue);
 
-        if (_enumMode == EnumPlanningMode.Standard && _bOnlyDevelopmentEpics)
+        if ((_enumMode == EnumPlanningMode.Standard || _enumMode == EnumPlanningMode.StrategicEpic) && _bOnlyDevelopmentEpics)
         {
             epicSource = epicSource.Where(e => e.IsInDevelopment);
         }
@@ -304,7 +304,7 @@ public class PlannerSimulator : SimulatorBase
                 float start = SprintPosition(e.StartDate.Value, false);
                 float end = SprintPosition(e.EndDate.Value, true);
 
-                if (_enumMode == EnumPlanningMode.Standard)
+                if (_enumMode == EnumPlanningMode.Standard || _enumMode == EnumPlanningMode.StrategicEpic)
                 {
                     start = (float)Math.Floor(start);
                     if (start < 0f)
@@ -384,9 +384,12 @@ public class PlannerSimulator : SimulatorBase
         SKColor BORDEAUX = SKColor.Parse("#800020");
         SKColor MAUVE = SKColors.Orchid;
 
-        string title = _enumMode == EnumPlanningMode.Analysis
-            ? "Gantt - Sprints (Analysis duration)"
-            : "Gantt - Sprints (Realisation duration)";
+        string title = _enumMode switch
+        {
+            EnumPlanningMode.Analysis => "Gantt - Sprints (Analysis duration)",
+            EnumPlanningMode.StrategicEpic => "Gantt - Sprints (Strategic epic planning)",
+            _ => "Gantt - Sprints (Realisation duration)"
+        };
         canvas.DrawText(title, leftLabelPad, 30, titlePaint);
 
         float maxPosition = ranges.Count > 0 ? ranges.Max(r => r.EndPosition) : 0f;
