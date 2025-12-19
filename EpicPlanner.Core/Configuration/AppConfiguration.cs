@@ -53,5 +53,7 @@ public class StrategicPlanningConfiguration
     public string IdColumn { get; set; } = "ID";
     public string DependencyColumn { get; set; } = "Dépendance";
     public string GroupColumn { get; set; } = "Groupe";
+    public bool ExportGanttPerGroup { get; set; } = false;
+    public Dictionary<string, string> GanttGroupTitles { get; set; } = new();
     public double AbsenceWeeksPerYear { get; set; } = 0;
 }

@@ -5,6 +5,7 @@ using EpicPlanner.Core.Shared.Models;
 using EpicPlanner.Core.Shared.Services;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -59,10 +60,7 @@ public class PlanningRunner
                 PlannerSimulator simulator = snapshot.CreatePlannerSimulator(_bOnlyDevelopmentEpics: true);
                 simulator.Run();
                 simulator.ExportPlanningExcel(ResolveExcelOutputPath(EnumPlanningMode.StrategicEpic));
-                simulator.ExportGanttSprintBased(
-                    ResolvePngOutputPath(EnumPlanningMode.StrategicEpic),
-                    EnumPlanningMode.StrategicEpic,
-                    true);
+                ExportStrategicGantt(simulator);
                 return;
             }
 
@@ -145,6 +143,123 @@ public class PlanningRunner
             !string.IsNullOrWhiteSpace(m_AppConfiguration.FileConfiguration.StrategicOutputPngFilePath)
             ? m_AppConfiguration.FileConfiguration.StrategicOutputPngFilePath!
             : m_AppConfiguration.FileConfiguration.OutputPngFilePath;
+    }
+
+    private void ExportStrategicGantt(PlannerSimulator _Simulator)
+    {
+        string outputPath = ResolvePngOutputPath(EnumPlanningMode.StrategicEpic);
+        StrategicPlanningConfiguration config = m_AppConfiguration.StrategicPlanningConfiguration;
+        if (!config.ExportGanttPerGroup)
+        {
+            _Simulator.ExportGanttSprintBased(outputPath, EnumPlanningMode.StrategicEpic, true);
+            return;
+        }
+
+        Dictionary<string, string> groupTitles = config.GanttGroupTitles
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+
+        Dictionary<string, List<Epic>> groupedEpics = BuildStrategicGroups(_Simulator.Epics);
+
+        foreach (var group in groupedEpics.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            string groupName = group.Key;
+            string title = ResolveGroupTitle(groupName, groupTitles);
+            string groupPath = BuildGroupOutputPath(outputPath, groupName);
+            _Simulator.ExportGanttSprintBased(
+                groupPath,
+                EnumPlanningMode.StrategicEpic,
+                true,
+                group.Value,
+                title);
+        }
+    }
+
+    private static Dictionary<string, List<Epic>> BuildStrategicGroups(IEnumerable<Epic> _Epics)
+    {
+        Dictionary<string, List<Epic>> grouped = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (Epic epic in _Epics)
+        {
+            List<string> groups = SplitGroups(epic.Group);
+            if (groups.Count == 0)
+            {
+                AddToGroup(grouped, "Ungrouped", epic);
+                continue;
+            }
+
+            foreach (string group in groups)
+            {
+                AddToGroup(grouped, group, epic);
+            }
+        }
+
+        return grouped;
+    }
+
+    private static void AddToGroup(Dictionary<string, List<Epic>> _Grouped, string _GroupName, Epic _Epic)
+    {
+        if (!_Grouped.TryGetValue(_GroupName, out List<Epic>? list))
+        {
+            list = new List<Epic>();
+            _Grouped[_GroupName] = list;
+        }
+
+        list.Add(_Epic);
+    }
+
+    private static List<string> SplitGroups(string? _RawGroup)
+    {
+        if (string.IsNullOrWhiteSpace(_RawGroup))
+        {
+            return new List<string>();
+        }
+
+        return _RawGroup
+            .Split(new[] { ',', ';', '/', '|' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(token => token.Trim())
+            .Where(token => token.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string ResolveGroupTitle(string _GroupName, Dictionary<string, string> _GroupTitles)
+    {
+        if (_GroupTitles.TryGetValue(_GroupName, out string? title) && !string.IsNullOrWhiteSpace(title))
+        {
+            return title.Trim();
+        }
+
+        return $"Gantt - Sprints (Strategic epic planning) - {_GroupName}";
+    }
+
+    private static string BuildGroupOutputPath(string _BasePath, string _GroupName)
+    {
+        string directory = Path.GetDirectoryName(_BasePath) ?? string.Empty;
+        string baseName = Path.GetFileNameWithoutExtension(_BasePath);
+        string extension = Path.GetExtension(_BasePath);
+        string safeGroup = SanitizeFileName(_GroupName);
+        if (string.IsNullOrWhiteSpace(safeGroup))
+        {
+            safeGroup = "group";
+        }
+
+        string fileName = $"{baseName}_{safeGroup}{extension}";
+        return Path.Combine(directory, fileName);
+    }
+
+    private static string SanitizeFileName(string _Value)
+    {
+        char[] invalid = Path.GetInvalidFileNameChars();
+        var chars = _Value.ToCharArray();
+        for (int i = 0; i < chars.Length; i++)
+        {
+            if (invalid.Contains(chars[i]))
+            {
+                chars[i] = '_';
+            }
+        }
+
+        return new string(chars).Trim();
     }
 
     private static void AlignAnalysisEpicsToEndDates(
