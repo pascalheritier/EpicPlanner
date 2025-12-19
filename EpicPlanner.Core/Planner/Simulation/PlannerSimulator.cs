@@ -392,7 +392,9 @@ public class PlannerSimulator : SimulatorBase
             EnumPlanningMode.StrategicEpic => "Gantt - Sprints (Strategic epic planning)",
             _ => "Gantt - Sprints (Realisation duration)"
         };
-        canvas.DrawText(title, leftLabelPad, 30, titlePaint);
+        float titleWidth = titlePaint.MeasureText(title);
+        float titleX = Math.Max(0, (width - titleWidth) / 2f);
+        canvas.DrawText(title, titleX, 30, titlePaint);
 
         float maxPosition = ranges.Count > 0 ? ranges.Max(r => r.EndPosition) : 0f;
         int maxSprint = Math.Max(1, (int)Math.Ceiling(maxPosition));

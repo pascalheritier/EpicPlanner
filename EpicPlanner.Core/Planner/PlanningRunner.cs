@@ -158,10 +158,9 @@ public class PlanningRunner
         Dictionary<string, string> groupTitles = config.GanttGroupTitles
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
 
-        var groupedEpics = _Simulator.Epics
-            .GroupBy(epic => NormalizeGroupName(epic.Group));
+        Dictionary<string, List<Epic>> groupedEpics = BuildStrategicGroups(_Simulator.Epics);
 
-        foreach (var group in groupedEpics)
+        foreach (var group in groupedEpics.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
         {
             string groupName = group.Key;
             string title = ResolveGroupTitle(groupName, groupTitles);
@@ -170,14 +169,57 @@ public class PlanningRunner
                 groupPath,
                 EnumPlanningMode.StrategicEpic,
                 true,
-                group,
+                group.Value,
                 title);
         }
     }
 
-    private static string NormalizeGroupName(string? _Group)
+    private static Dictionary<string, List<Epic>> BuildStrategicGroups(IEnumerable<Epic> _Epics)
     {
-        return string.IsNullOrWhiteSpace(_Group) ? "Ungrouped" : _Group.Trim();
+        Dictionary<string, List<Epic>> grouped = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (Epic epic in _Epics)
+        {
+            List<string> groups = SplitGroups(epic.Group);
+            if (groups.Count == 0)
+            {
+                AddToGroup(grouped, "Ungrouped", epic);
+                continue;
+            }
+
+            foreach (string group in groups)
+            {
+                AddToGroup(grouped, group, epic);
+            }
+        }
+
+        return grouped;
+    }
+
+    private static void AddToGroup(Dictionary<string, List<Epic>> _Grouped, string _GroupName, Epic _Epic)
+    {
+        if (!_Grouped.TryGetValue(_GroupName, out List<Epic>? list))
+        {
+            list = new List<Epic>();
+            _Grouped[_GroupName] = list;
+        }
+
+        list.Add(_Epic);
+    }
+
+    private static List<string> SplitGroups(string? _RawGroup)
+    {
+        if (string.IsNullOrWhiteSpace(_RawGroup))
+        {
+            return new List<string>();
+        }
+
+        return _RawGroup
+            .Split(new[] { ',', ';', '/', '|' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(token => token.Trim())
+            .Where(token => token.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static string ResolveGroupTitle(string _GroupName, Dictionary<string, string> _GroupTitles)
