@@ -25,6 +25,7 @@ public class Epic
     public DateTime? EndDate { get; set; }
     public List<Allocation> History { get; } = new();
     public EnumEpicPriority Priority { get; set; } = EnumEpicPriority.Normal;
+    public string Group { get; set; } = string.Empty;
 
     public bool IsInDevelopment => State.Contains("develop") && !State.Contains("pending");
     public bool IsOtherAllowed => State.Contains("analysis") || State.Contains("pending");

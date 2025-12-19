@@ -597,7 +597,8 @@ public class PlanningDataProvider
 
             var epic = new Epic(epicName, "development", charge, endAnalysis: null)
             {
-                Priority = EnumEpicPriority.Normal
+                Priority = EnumEpicPriority.Normal,
+                Group = groupValue
             };
 
             strategicEpics.Add(new StrategicEpicMeta(epic, orderValue, groupValue, epicId, dependencyIds));

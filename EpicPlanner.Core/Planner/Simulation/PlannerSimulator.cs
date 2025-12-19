@@ -288,9 +288,11 @@ public class PlannerSimulator : SimulatorBase
     public void ExportGanttSprintBased(
         string _strOutputPngPath,
         EnumPlanningMode _enumMode,
-        bool _bOnlyDevelopmentEpics = false)
+        bool _bOnlyDevelopmentEpics = false,
+        IEnumerable<Epic>? _Epics = null,
+        string? _TitleOverride = null)
     {
-        IEnumerable<Epic> epicSource = Epics
+        IEnumerable<Epic> epicSource = (_Epics ?? Epics)
             .Where(e => e.StartDate.HasValue && e.EndDate.HasValue);
 
         if ((_enumMode == EnumPlanningMode.Standard || _enumMode == EnumPlanningMode.StrategicEpic) && _bOnlyDevelopmentEpics)
@@ -368,7 +370,7 @@ public class PlannerSimulator : SimulatorBase
         var axisPaint = new SKPaint { Color = SKColors.Black, TextSize = 12, IsAntialias = true };
 
         float maxLabelWidth = 0;
-        foreach (var epic in Epics.Where(ep => ep.StartDate.HasValue && ep.EndDate.HasValue))
+        foreach (var epic in epicSource)
         {
             float widthMeasure = labelPaint.MeasureText(epic.Name);
             if (widthMeasure > maxLabelWidth)
@@ -384,7 +386,7 @@ public class PlannerSimulator : SimulatorBase
         SKColor BORDEAUX = SKColor.Parse("#800020");
         SKColor MAUVE = SKColors.Orchid;
 
-        string title = _enumMode switch
+        string title = _TitleOverride ?? _enumMode switch
         {
             EnumPlanningMode.Analysis => "Gantt - Sprints (Analysis duration)",
             EnumPlanningMode.StrategicEpic => "Gantt - Sprints (Strategic epic planning)",
