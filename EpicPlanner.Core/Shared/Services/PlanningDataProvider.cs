@@ -391,7 +391,8 @@ public class PlanningDataProvider
                 double scale = (double)workingDaysInSprint / m_iSprintCapacityDays;
                 userSprintCapacity.AdapteCapacityToScale(scale);
 
-                if (_AbsencesPerResource.TryGetValue(user, out var absList))
+                string? absenceKeyMatch = _AbsencesPerResource.Keys.FirstOrDefault(_Ak => _Ak.Contains(user)); // absence key might differ slightly from user key
+                if (!string.IsNullOrEmpty(absenceKeyMatch) && _AbsencesPerResource.TryGetValue(absenceKeyMatch, out var absList))
                 {
                     foreach (var (start, end) in absList)
                     {
