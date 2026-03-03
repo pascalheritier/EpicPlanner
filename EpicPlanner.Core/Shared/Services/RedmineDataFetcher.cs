@@ -23,6 +23,8 @@ public class RedmineDataFetcher
     private readonly HttpClient m_HttpClient;
     private readonly SemaphoreSlim m_EpicEnumerationLock = new(1, 1);
     private Dictionary<int, string>? m_EpicEnumerationCache;
+    private readonly SemaphoreSlim m_VersionCacheLock = new(1, 1);
+    private Dictionary<int, int>? m_SprintVersionCache; // sprint number -> Redmine version ID
 
     #endregion
 
@@ -317,13 +319,110 @@ public class RedmineDataFetcher
 
     private async Task<IEnumerable<Issue>> GetSprintIssuesAsync(int _iSprintNumber)
     {
+        int? versionId = await GetVersionIdForSprintAsync(_iSprintNumber).ConfigureAwait(false);
+        int resolvedVersionId = versionId ?? (185 + _iSprintNumber); // fallback to original offset
+
         var parameters = new NameValueCollection
         {
             { RedmineKeys.TRACKER_ID, "6" }, // Tracker ID for TODO
-            { RedmineKeys.FIXED_VERSION_ID, (184 + _iSprintNumber).ToString() } // Sprint version IDs start at 185 for Sprint 1
+            { RedmineKeys.FIXED_VERSION_ID, resolvedVersionId.ToString() }
         };
 
         return await GetIssuesAsync(parameters);
+    }
+
+    private async Task<int?> GetVersionIdForSprintAsync(int _iSprintNumber)
+    {
+        if (m_SprintVersionCache != null)
+            return m_SprintVersionCache.TryGetValue(_iSprintNumber, out int id) ? id : null;
+
+        await m_VersionCacheLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (m_SprintVersionCache != null)
+                return m_SprintVersionCache.TryGetValue(_iSprintNumber, out int id) ? id : null;
+
+            m_SprintVersionCache = await BuildSprintVersionCacheAsync().ConfigureAwait(false);
+            return m_SprintVersionCache.TryGetValue(_iSprintNumber, out int cachedId) ? cachedId : null;
+        }
+        finally
+        {
+            m_VersionCacheLock.Release();
+        }
+    }
+
+    private async Task<Dictionary<int, int>> BuildSprintVersionCacheAsync()
+    {
+        var cache = new Dictionary<int, int>();
+        try
+        {
+            int? projectId = await ResolveSprintProjectIdAsync().ConfigureAwait(false);
+            if (!projectId.HasValue)
+                return cache;
+
+            string url = $"projects/{projectId.Value}/versions.json";
+            using HttpResponseMessage response = await m_HttpClient.GetAsync(url).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                return cache;
+
+            await using Stream stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            VersionsResponse? payload = await JsonSerializer
+                .DeserializeAsync<VersionsResponse>(stream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                .ConfigureAwait(false);
+
+            if (payload?.Versions == null)
+                return cache;
+
+            foreach (RedmineVersion version in payload.Versions)
+            {
+                if (version == null || string.IsNullOrWhiteSpace(version.Name))
+                    continue;
+
+                if (TryParseSprintNumber(version.Name, out int sprintNumber) && sprintNumber > 0)
+                    cache[sprintNumber] = version.Id;
+            }
+        }
+        catch
+        {
+            // Swallow - fallback to offset will be used in GetSprintIssuesAsync
+        }
+        return cache;
+    }
+
+    private async Task<int?> ResolveSprintProjectIdAsync()
+    {
+        try
+        {
+            // Fetch a single TODO issue to discover which project sprint versions belong to
+            string url = "issues.json?tracker_id=6&status_id=*&limit=1";
+            using HttpResponseMessage response = await m_HttpClient.GetAsync(url).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            await using Stream stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+            IssuesProjectResponse? payload = await JsonSerializer
+                .DeserializeAsync<IssuesProjectResponse>(stream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                .ConfigureAwait(false);
+
+            return payload?.Issues?.FirstOrDefault()?.Project?.Id;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool TryParseSprintNumber(string _strVersionName, out int _iSprintNumber)
+    {
+        // Match trailing number: "Sprint 83" -> 83, "S83" -> 83, "83" -> 83
+        var match = Regex.Match(_strVersionName.Trim(), @"(?<!\d)(\d+)$");
+        if (match.Success && int.TryParse(match.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+        {
+            _iSprintNumber = parsed;
+            return true;
+        }
+        _iSprintNumber = 0;
+        return false;
     }
 
     private async Task<List<TimeEntryRecord>> GetTimeEntriesAsync(DateTime _SprintStart, DateTime _SprintEnd)
@@ -870,6 +969,39 @@ public class RedmineDataFetcher
 
         [JsonPropertyName("label")]
         public string? Label { get; set; }
+    }
+
+    private sealed class VersionsResponse
+    {
+        [JsonPropertyName("versions")]
+        public List<RedmineVersion> Versions { get; set; } = new();
+    }
+
+    private sealed class RedmineVersion
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+    }
+
+    private sealed class IssuesProjectResponse
+    {
+        [JsonPropertyName("issues")]
+        public List<IssueProjectRef>? Issues { get; set; }
+    }
+
+    private sealed class IssueProjectRef
+    {
+        [JsonPropertyName("project")]
+        public ProjectRef? Project { get; set; }
+    }
+
+    private sealed class ProjectRef
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
     }
 
     private sealed class TimeEntriesResponse
