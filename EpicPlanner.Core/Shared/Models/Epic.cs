@@ -26,6 +26,9 @@ public class Epic
     public List<Allocation> History { get; } = new();
     public EnumEpicPriority Priority { get; set; } = EnumEpicPriority.Normal;
     public string Group { get; set; } = string.Empty;
+    public string Manager { get; set; } = string.Empty;
+    public string Analyst { get; set; } = string.Empty;
+    public double OriginalEstimate { get; set; }
 
     public bool IsInDevelopment => State.Contains("develop") && !State.Contains("pending");
     public bool IsOtherAllowed => State.Contains("analysis") || State.Contains("pending");

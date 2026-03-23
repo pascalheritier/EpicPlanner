@@ -461,7 +461,8 @@ public class PlanningDataProvider
         int epicCol = headers.ContainsKey("Epic name") ? headers["Epic name"] : 1;
         int stateCol = headers.ContainsKey("State") ? headers["State"] : 2;
         int remainingCol = headers.FirstOrDefault(kv => kv.Key.Contains("Remaining", StringComparison.OrdinalIgnoreCase)).Value;
-        int roughCol = headers.FirstOrDefault(kv => kv.Key.Contains("Rough", StringComparison.OrdinalIgnoreCase)).Value;
+        int roughCol = headers.FirstOrDefault(kv => kv.Key.Contains("Original estimate", StringComparison.OrdinalIgnoreCase)
+            || kv.Key.Contains("Rough", StringComparison.OrdinalIgnoreCase)).Value;
         int assignedCol = headers.FirstOrDefault(kv => kv.Key.Contains("Assigned to", StringComparison.OrdinalIgnoreCase)).Value;
         int willAssignCol = headers.FirstOrDefault(kv => kv.Key.Contains("Will be assigned", StringComparison.OrdinalIgnoreCase)
             || kv.Key.Contains("Will be assigne", StringComparison.OrdinalIgnoreCase)).Value;
@@ -469,6 +470,8 @@ public class PlanningDataProvider
         int depCol = headers.FirstOrDefault(kv => kv.Key.Contains("Epic dependency", StringComparison.OrdinalIgnoreCase)
             || kv.Key.Contains("Dependency", StringComparison.OrdinalIgnoreCase)).Value;
         int endAnalysisCol = headers.FirstOrDefault(kv => kv.Key.Contains("End of analysis", StringComparison.OrdinalIgnoreCase)).Value;
+        int managerCol = headers.FirstOrDefault(kv => kv.Key.Contains("manager", StringComparison.OrdinalIgnoreCase)).Value;
+        int analystCol = headers.FirstOrDefault(kv => kv.Key.Contains("analyst", StringComparison.OrdinalIgnoreCase)).Value;
 
         int rows = _EpicWorksheet.Dimension.End.Row;
         var epics = new List<Epic>();
@@ -503,9 +506,15 @@ public class PlanningDataProvider
             if (DateTime.TryParse(endAnalysisStr, out var parsed))
                 endAnalysis = parsed;
 
+            string manager = managerCol > 0 ? (_EpicWorksheet.Cells[row, managerCol].GetValue<string>() ?? string.Empty).Trim() : string.Empty;
+            string analyst = analystCol > 0 ? (_EpicWorksheet.Cells[row, analystCol].GetValue<string>() ?? string.Empty).Trim() : string.Empty;
+
             var epic = new Epic(epicName, state, charge, endAnalysis)
             {
-                Priority = priority
+                Priority = priority,
+                Manager = manager,
+                Analyst = analyst,
+                OriginalEstimate = roughVal > 0 ? roughVal : charge
             };
             epic.ParseAssignments(assigned, willAssign, _ResourceNames);
             epic.ParseDependencies(depRaw);

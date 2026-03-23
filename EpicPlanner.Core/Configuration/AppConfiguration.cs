@@ -18,6 +18,7 @@ public class FileConfiguration
     public string? StrategicOutputPngFilePath { get; set; }
     public string OutputFilePath { get; set; } = string.Empty;
     public string OutputPngFilePath { get; set; } = string.Empty;
+    public string? DevSprintSummaryOutputPngFilePath { get; set; }
 }
 
 public class PlannerConfiguration

@@ -76,6 +76,9 @@ public class PlanningRunner
                     ResolvePngOutputPath(EnumPlanningMode.Standard),
                     EnumPlanningMode.Standard,
                     onlyDevelopmentEpics);
+                string? devSummaryPath = m_AppConfiguration.FileConfiguration.DevSprintSummaryOutputPngFilePath;
+                if (!string.IsNullOrWhiteSpace(devSummaryPath))
+                    simulator.ExportDevSprintSummaryImage(devSummaryPath);
                 return;
             }
         }

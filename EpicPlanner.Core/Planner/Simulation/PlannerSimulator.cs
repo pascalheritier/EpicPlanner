@@ -550,4 +550,180 @@ public class PlannerSimulator : SimulatorBase
         using var stream = File.OpenWrite(_strOutputPngPath);
         data.SaveTo(stream);
     }
+
+    public void ExportDevSprintSummaryImage(string _strOutputPngPath)
+    {
+        var sprint0Allocs = AllocationHistory
+            .Where(a => a.Sprint == 0)
+            .GroupBy(a => a.Epic, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var devEpics = Epics
+            .Where(e => e.IsInDevelopment && sprint0Allocs.ContainsKey(e.Name))
+            .OrderBy(e => ExtractEpicKey(e.Name).Year)
+            .ThenBy(e => ExtractEpicKey(e.Name).Num)
+            .ToList();
+
+        var rows = devEpics.Select(e =>
+        {
+            var devs = sprint0Allocs.TryGetValue(e.Name, out var allocs)
+                ? allocs
+                    .GroupBy(a => a.Resource, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => (Resource: g.Key, Hours: Math.Round(g.Sum(x => x.Hours), 1)))
+                    .OrderByDescending(x => x.Hours)
+                    .ToList()
+                : new List<(string Resource, double Hours)>();
+            return (Epic: e, Devs: devs);
+        }).ToList();
+
+        const int imgWidth = 1400;
+        const int colEpicW = 340;      // 24%
+        const int colMgrW = 190;       // 14%
+        const int colAnalystW = 190;   // 14%
+        const int colProgressW = 120;  // 9%  – Avancement
+        const int colRemainingW = 130; // 9%  – Reste à faire
+        // remaining ~30% for devs
+        const int leftPad = 12;
+        const int titleH = 60;
+        const int subtitleH = 30;
+        const int headerH = 36;
+        const int rowLineH = 22;
+        const int rowMinH = 36;
+        const int cellPadV = 7;
+        const float textSize = 13f;
+        const float headerTextSize = 14f;
+        const float titleTextSize = 22f;
+        const float subtitleTextSize = 14f;
+
+        var rowHeights = rows.Select(r =>
+            Math.Max(rowMinH, r.Devs.Count * rowLineH + cellPadV * 2)
+        ).ToList();
+
+        int totalH = titleH + subtitleH + headerH + rowHeights.Sum() + 10;
+
+        int sprintNum = SprintOffset;
+        DateTime sprintStart = InitialSprintDate;
+        DateTime sprintEnd = sprintStart.AddDays(SprintLengthDays - 1);
+
+        using var bitmap = new SKBitmap(imgWidth, totalH);
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(SKColors.White);
+
+        var titlePaint = new SKPaint { Color = SKColors.Black, TextSize = titleTextSize, IsAntialias = true, FakeBoldText = true };
+        var subtitlePaint = new SKPaint { Color = new SKColor(100, 100, 100), TextSize = subtitleTextSize, IsAntialias = true };
+        var headerBgPaint = new SKPaint { Color = SKColor.Parse("#1E3A5F"), Style = SKPaintStyle.Fill };
+        var headerTextPaint = new SKPaint { Color = SKColors.White, TextSize = headerTextSize, IsAntialias = true, FakeBoldText = true };
+        var cellTextPaint = new SKPaint { Color = new SKColor(30, 30, 30), TextSize = textSize, IsAntialias = true };
+        var dimTextPaint = new SKPaint { Color = new SKColor(160, 160, 160), TextSize = textSize, IsAntialias = true };
+        var evenBgPaint = new SKPaint { Color = new SKColor(245, 247, 250), Style = SKPaintStyle.Fill };
+        var borderPaint = new SKPaint { Color = new SKColor(210, 210, 210), Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
+        var colSepPaint = new SKPaint { Color = new SKColor(210, 210, 210), Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
+        var headerSepPaint = new SKPaint { Color = new SKColor(80, 110, 150), Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
+
+        string title = $"Sprint {sprintNum} - Epics en développement";
+        float titleW = titlePaint.MeasureText(title);
+        canvas.DrawText(title, (imgWidth - titleW) / 2f, 40, titlePaint);
+
+        string subtitle = $"{sprintStart:dd/MM/yyyy} – {sprintEnd:dd/MM/yyyy}  •  {devEpics.Count} epic{(devEpics.Count != 1 ? "s" : "")}";
+        float subtW = subtitlePaint.MeasureText(subtitle);
+        canvas.DrawText(subtitle, (imgWidth - subtW) / 2f, titleH + 20, subtitlePaint);
+
+        int headerTop = titleH + subtitleH;
+        canvas.DrawRect(new SKRect(0, headerTop, imgWidth, headerTop + headerH), headerBgPaint);
+
+        float headerTextY = headerTop + (headerH + headerTextSize * 0.7f) / 2f;
+        int x1 = colEpicW;
+        int x2 = x1 + colMgrW;
+        int x3 = x2 + colAnalystW;
+        int x4 = x3 + colProgressW;
+        int x5 = x4 + colRemainingW;
+
+        canvas.DrawText("Epic", leftPad, headerTextY, headerTextPaint);
+        canvas.DrawText("Epic Manager", x1 + leftPad, headerTextY, headerTextPaint);
+        canvas.DrawText("Epic Analyst", x2 + leftPad, headerTextY, headerTextPaint);
+        canvas.DrawText("Avancement", x3 + leftPad, headerTextY, headerTextPaint);
+        canvas.DrawText("Reste à faire", x4 + leftPad, headerTextY, headerTextPaint);
+        canvas.DrawText("Réalisateurs", x5 + leftPad, headerTextY, headerTextPaint);
+
+        canvas.DrawLine(x1, headerTop, x1, headerTop + headerH, headerSepPaint);
+        canvas.DrawLine(x2, headerTop, x2, headerTop + headerH, headerSepPaint);
+        canvas.DrawLine(x3, headerTop, x3, headerTop + headerH, headerSepPaint);
+        canvas.DrawLine(x4, headerTop, x4, headerTop + headerH, headerSepPaint);
+        canvas.DrawLine(x5, headerTop, x5, headerTop + headerH, headerSepPaint);
+
+        int currentY = headerTop + headerH;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var (epic, devs) = rows[i];
+            int rowH = rowHeights[i];
+
+            if (i % 2 == 1)
+                canvas.DrawRect(new SKRect(0, currentY, imgWidth, currentY + rowH), evenBgPaint);
+
+            canvas.DrawLine(0, currentY + rowH, imgWidth, currentY + rowH, borderPaint);
+            canvas.DrawLine(x1, currentY, x1, currentY + rowH, colSepPaint);
+            canvas.DrawLine(x2, currentY, x2, currentY + rowH, colSepPaint);
+            canvas.DrawLine(x3, currentY, x3, currentY + rowH, colSepPaint);
+            canvas.DrawLine(x4, currentY, x4, currentY + rowH, colSepPaint);
+            canvas.DrawLine(x5, currentY, x5, currentY + rowH, colSepPaint);
+
+            float epicTextY = currentY + (rowH + textSize * 0.7f) / 2f;
+            canvas.DrawText(TruncateText(epic.Name, colEpicW - leftPad * 2, cellTextPaint), leftPad, epicTextY, cellTextPaint);
+
+            string manager = string.IsNullOrWhiteSpace(epic.Manager) ? "—" : epic.Manager;
+            var mgrPaint = string.IsNullOrWhiteSpace(epic.Manager) ? dimTextPaint : cellTextPaint;
+            canvas.DrawText(TruncateText(manager, colMgrW - leftPad * 2, mgrPaint), x1 + leftPad, epicTextY, mgrPaint);
+
+            string analyst = string.IsNullOrWhiteSpace(epic.Analyst) ? "—" : epic.Analyst;
+            var analystPaint = string.IsNullOrWhiteSpace(epic.Analyst) ? dimTextPaint : cellTextPaint;
+            canvas.DrawText(TruncateText(analyst, colAnalystW - leftPad * 2, analystPaint), x2 + leftPad, epicTextY, analystPaint);
+
+            double remaining = Math.Max(0, epic.Charge);
+            double original = epic.OriginalEstimate > 0 ? epic.OriginalEstimate : remaining;
+            int donePct = original > 0 ? (int)Math.Round(Math.Min(100.0, (original - remaining) / original * 100.0)) : 0;
+            canvas.DrawText($"{donePct}%", x3 + leftPad, epicTextY, cellTextPaint);
+            canvas.DrawText(remaining > 0 ? $"{remaining:0.#}h" : "—", x4 + leftPad, epicTextY, cellTextPaint);
+
+            int devsColX = x5;
+            if (devs.Count == 0)
+            {
+                canvas.DrawText("—", devsColX + leftPad, epicTextY, dimTextPaint);
+            }
+            else
+            {
+                float devY = currentY + cellPadV + textSize * 0.75f;
+                foreach (var (resource, hours) in devs)
+                {
+                    canvas.DrawText($"{resource}  ({hours:0.#}h)", devsColX + leftPad, devY, cellTextPaint);
+                    devY += rowLineH;
+                }
+            }
+
+            currentY += rowH;
+        }
+
+        using var outerPaint = new SKPaint { Color = new SKColor(180, 180, 180), Style = SKPaintStyle.Stroke, StrokeWidth = 1 };
+        canvas.DrawRect(new SKRect(0.5f, headerTop + 0.5f, imgWidth - 0.5f, currentY - 0.5f), outerPaint);
+
+        using var img = SKImage.FromPixels(bitmap.PeekPixels());
+        using var imgData = img.Encode(SKEncodedImageFormat.Png, 90);
+        using var stream = File.OpenWrite(_strOutputPngPath);
+        imgData.SaveTo(stream);
+    }
+
+    private static string TruncateText(string _strText, float _fMaxWidth, SKPaint _Paint)
+    {
+        if (_Paint.MeasureText(_strText) <= _fMaxWidth)
+            return _strText;
+
+        const string ellipsis = "...";
+        float ellipsisWidth = _Paint.MeasureText(ellipsis);
+        for (int i = _strText.Length - 1; i >= 0; i--)
+        {
+            string candidate = _strText[..i] + ellipsis;
+            if (_Paint.MeasureText(candidate) <= _fMaxWidth)
+                return candidate;
+        }
+        return ellipsis;
+    }
 }
