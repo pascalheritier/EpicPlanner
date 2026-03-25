@@ -6,6 +6,7 @@ public class AppConfiguration
     public RedmineConfiguration RedmineConfiguration { get; set; } = new();
     public PlannerConfiguration PlannerConfiguration { get; set; } = new();
     public StrategicPlanningConfiguration StrategicPlanningConfiguration { get; set; } = new();
+    public EpicAnalysisReportConfiguration EpicAnalysisReportConfiguration { get; set; } = new();
 }
 
 public class FileConfiguration

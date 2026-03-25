@@ -1,3 +1,4 @@
+using EpicPlanner.Core.Checker.Reports;
 using EpicPlanner.Core.Checker.Services;
 using EpicPlanner.Core.Checker.Simulation;
 using EpicPlanner.Core.Configuration;
@@ -12,15 +13,23 @@ public class CheckingRunner
 
     private readonly PlanningDataProvider m_DataProvider;
     private readonly AppConfiguration m_AppConfiguration;
+    private readonly EpicAnalysisDataLoader m_AnalysisDataLoader;
+    private readonly EpicAnalysisHtmlGenerator m_AnalysisHtmlGenerator;
 
     #endregion
 
     #region Constructor
 
-    public CheckingRunner(PlanningDataProvider _DataProvider, AppConfiguration _AppConfiguration)
+    public CheckingRunner(
+        PlanningDataProvider _DataProvider,
+        AppConfiguration _AppConfiguration,
+        EpicAnalysisDataLoader _AnalysisDataLoader,
+        EpicAnalysisHtmlGenerator _AnalysisHtmlGenerator)
     {
         m_DataProvider = _DataProvider;
         m_AppConfiguration = _AppConfiguration;
+        m_AnalysisDataLoader = _AnalysisDataLoader;
+        m_AnalysisHtmlGenerator = _AnalysisHtmlGenerator;
     }
 
     #endregion
@@ -34,7 +43,22 @@ public class CheckingRunner
         simulator.Run();
         string outputPath = ResolveOutputPath(_enumMode);
         simulator.ExportCheckerReport(outputPath, _enumMode);
+
+        if (_enumMode == EnumCheckerMode.EpicStates)
+        {
+            await GenerateEpicAnalysisHtmlAsync();
+        }
+
         return outputPath;
+    }
+
+    private async Task GenerateEpicAnalysisHtmlAsync()
+    {
+        string htmlPath = m_AppConfiguration.EpicAnalysisReportConfiguration.OutputHtmlPath;
+        if (string.IsNullOrWhiteSpace(htmlPath)) return;
+
+        EpicAnalysisReportModel model = await m_AnalysisDataLoader.LoadAsync();
+        m_AnalysisHtmlGenerator.Generate(model, htmlPath);
     }
 
     #endregion
