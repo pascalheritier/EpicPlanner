@@ -32,8 +32,10 @@ public class EpicAnalysisDataLoader
         DateTime SprintStart,
         IReadOnlyDictionary<string, double> InitialRemaining,
         IReadOnlyDictionary<string, double> Allocated,
-        /// <summary>resource (Excel name) → epicId → hours planned this sprint.</summary>
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> AllocatedByResource);
+        /// <summary>resource → epicId → hours planned this sprint (AllocationsByEpicAndSprint).</summary>
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> AllocatedByResource,
+        /// <summary>resource → maintenance hours planned this sprint (MaintenanceCapacities).</summary>
+        IReadOnlyDictionary<string, double> MaintenancePlanned);
 
     #endregion
 
@@ -164,6 +166,35 @@ public class EpicAnalysisDataLoader
                 Dictionary<string, Dictionary<string, double>[]> consumedByDev =
                     await fetcher.GetConsumedHoursPerDeveloperAsync(sprintRanges).ConfigureAwait(false);
 
+                // Aggregate Redmine consumed hours by epic (sum over all developers)
+                // and override EpicAnalysisEntry.Consumed with these values.
+                var redmineByEpic = new Dictionary<string, double[]>(StringComparer.OrdinalIgnoreCase);
+                foreach (Dictionary<string, double>[] devSprints in consumedByDev.Values)
+                {
+                    for (int i = 0; i < n; i++)
+                    {
+                        foreach ((string epicFull, double hours) in devSprints[i])
+                        {
+                            if (epicFull is "Maintenance" or "[Analyse]" or "[Suivi]") continue;
+                            string epicId = ExtractEpicId(epicFull);
+                            if (string.IsNullOrEmpty(epicId)) continue;
+                            if (!redmineByEpic.TryGetValue(epicId, out double[]? arr))
+                            {
+                                arr = new double[n];
+                                redmineByEpic[epicId] = arr;
+                            }
+                            arr[i] = Math.Round(arr[i] + hours, 1);
+                        }
+                    }
+                }
+
+                foreach (EpicAnalysisEntry e in mainEntries)
+                {
+                    if (!redmineByEpic.TryGetValue(e.Id, out double[]? redmineArr)) continue;
+                    for (int i = 0; i < n; i++)
+                        e.Consumed[i] = redmineArr[i];
+                }
+
                 developerStats = consumedByDev
                     .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
                     .Select(kv =>
@@ -190,12 +221,14 @@ public class EpicAnalysisDataLoader
                                 bool isSpecial = epicFull is "Maintenance" or "[Analyse]" or "[Suivi]";
                                 if (isSpecial)
                                 {
+                                    double specialPlanned = epicFull == "Maintenance" &&
+                                        history[i].MaintenancePlanned.TryGetValue(devName, out double mp) ? mp : 0;
                                     epicDetails[i].Add(new DeveloperEpicDetail
                                     {
                                         EpicId   = epicFull,
                                         EpicName = string.Empty,
                                         Consumed = hours,
-                                        Planned  = 0,
+                                        Planned  = specialPlanned,
                                     });
                                     continue;
                                 }
@@ -340,22 +373,23 @@ public class EpicAnalysisDataLoader
             var initialRemaining  = new Dictionary<string, double>(s_IdComparer);
             var allocated         = new Dictionary<string, double>(s_IdComparer);
             var allocatedByRes    = new Dictionary<string, Dictionary<string, double>>(StringComparer.OrdinalIgnoreCase);
+            var maintenancePlanned = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             DateTime sprintStart  = DateTime.MinValue;
 
             ReadFinalSchedule(package, initialRemaining);
             ReadAllocationsByEpicPerSprint(package, sprintNumber, allocated, ref sprintStart);
             ReadAllocationsByEpicAndSprint(package, sprintNumber, allocatedByRes);
+            ReadMaintenanceCapacities(package, sprintNumber, maintenancePlanned);
 
             if (sprintStart == DateTime.MinValue)
                 sprintStart = InferSprintStartFromFinalSchedule(package);
 
-            // Convert inner dicts to read-only
             var roByRes = allocatedByRes.ToDictionary(
                 kv => kv.Key,
                 kv => (IReadOnlyDictionary<string, double>)kv.Value,
                 StringComparer.OrdinalIgnoreCase);
 
-            return new SprintFileData(sprintNumber, sprintStart, initialRemaining, allocated, roByRes);
+            return new SprintFileData(sprintNumber, sprintStart, initialRemaining, allocated, roByRes, maintenancePlanned);
         }
         catch
         {
@@ -494,6 +528,48 @@ public class EpicAnalysisDataLoader
             }
             epicDict.TryGetValue(epicId, out double existing);
             epicDict[epicId] = Math.Round(existing + hours.Value, 1);
+        }
+    }
+
+    /// <summary>
+    /// Reads MaintenanceCapacities (Sprint, Resource, Maintenance_h) for a given sprint number
+    /// and populates <paramref name="target"/>: resource → maintenance hours.
+    /// </summary>
+    private static void ReadMaintenanceCapacities(
+        ExcelPackage package,
+        int targetSprintNumber,
+        Dictionary<string, double> target)
+    {
+        ExcelWorksheet? ws = package.Workbook.Worksheets["MaintenanceCapacities"];
+        if (ws?.Dimension is null) return;
+
+        int colSprint = 1, colResource = 2, colHours = 3;
+        int maxCol = ws.Dimension.End.Column;
+        for (int c = 1; c <= maxCol; c++)
+        {
+            string? h = ws.Cells[1, c].GetValue<string>()?.Trim();
+            if (h is null) continue;
+            if (h.Equals("Sprint",   StringComparison.OrdinalIgnoreCase)) colSprint   = c;
+            else if (h.StartsWith("Resource",    StringComparison.OrdinalIgnoreCase)) colResource = c;
+            else if (h.StartsWith("Maintenance", StringComparison.OrdinalIgnoreCase)) colHours    = c;
+        }
+
+        int maxRow = ws.Dimension.End.Row;
+        for (int r = 2; r <= maxRow; r++)
+        {
+            int? sprint = ws.Cells[r, colSprint].GetValue<int?>()
+                       ?? (int?)TryParseDouble(ws.Cells[r, colSprint].Text);
+            if (sprint != targetSprintNumber) continue;
+
+            string? resource = ws.Cells[r, colResource].GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(resource)) continue;
+
+            double? hours = ws.Cells[r, colHours].GetValue<double?>()
+                         ?? TryParseDouble(ws.Cells[r, colHours].Text);
+            if (hours is null || hours <= 0) continue;
+
+            target.TryGetValue(resource, out double existing);
+            target[resource] = Math.Round(existing + hours.Value, 1);
         }
     }
 

@@ -172,7 +172,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
   <table class="epic-table" id="tbl-ok"></table>
 </div>
 
-<div class="section-title section-toggle" onclick="toggleSection('sec-done')">&#9989; Epics termin&eacute;s ou &agrave; l'arr&ecirc;t (depuis {{firstSprint}})</div>
+<div class="section-title section-toggle" onclick="toggleSection('sec-done')">&#9989; Epics termin&eacute;s (depuis {{firstSprint}})</div>
 <div id="sec-done" class="collapsible">
   <table class="epic-table" id="tbl-done"></table>
 </div>
@@ -234,6 +234,16 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
   </div>
 </div>
 
+<div class="modal-overlay" id="epic-drill-modal" onclick="closeEpicDrillModal(event)" style="z-index:1100">
+  <div class="modal" id="epic-drill-modal-box">
+    <button class="modal-close" onclick="closeEpicDrillModal()">&#10005;</button>
+    <h2 id="epic-drill-modal-title"></h2>
+    <div class="meta-row" id="epic-drill-modal-meta"></div>
+    <div class="chart-container" style="height:360px"><canvas id="epic-drill-modal-chart"></canvas></div>
+    <div id="epic-drill-chart-legend" style="margin-top:10px;font-size:11px;color:#555;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 10px;background:#f8f9ff;border-radius:6px;border:1px solid #e8eaf6"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal" onclick="closeModal(event)">
   <div class="modal" id="modal-box">
     <button class="modal-close" onclick="closeModal()">&#10005;</button>
@@ -262,8 +272,9 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
 //  HELPERS
 // ═══════════════════════════════════════════════════
 function pct(e) {
+  const consumed = e.consumed.reduce((s, v) => s + (v ?? 0), 0);
   if (!e.orig || e.orig === 0) return e.cur === 0 ? 100 : 0;
-  return Math.round((e.orig - e.cur) / e.orig * 100);
+  return Math.round(consumed / e.orig * 100);
 }
 function progColor(e) {
   if (e.risk === 'critical') return 'red';
@@ -292,8 +303,8 @@ function tableHeader(showRisk = true) {
     <th>Responsable</th>
     <th>Ressources assign&eacute;es</th>
     <th style="min-width:130px">Avancement</th>
-    <th>Consomm&eacute;</th>
-    <th>Restant</th>
+    <th>Consomm&eacute; r&eacute;el</th>
+    <th>Restant actuel</th>
     ${showRisk ? '<th>Statut</th><th style="min-width:110px">Depuis</th>' : ''}
     <th>Graphique</th>
   </tr></thead>`;
@@ -301,7 +312,9 @@ function tableHeader(showRisk = true) {
 
 function epicRow(e, showRisk = true) {
   const p = pct(e);
-  const consumed = e.orig ? (e.orig - e.cur) : 0;
+  const consumed = Math.round(e.consumed.reduce((s, v) => s + (v ?? 0), 0) * 10) / 10;
+  const firstActiveIdx = e.allocation.findIndex(h => h > 0);
+  const firstSprint = firstActiveIdx >= 0 ? SPRINT_LABELS[firstActiveIdx] : '\u2014';
   const cls = {critical:'row-red', watch:'row-orange', ok:'row-green', done:'row-done'}[e.risk];
   return `<tr class="clickable ${cls}" onclick="openModal('${e.id}')">
     <td><strong>${e.id}</strong><br><span style="color:#555;font-size:11px">${e.name}</span></td>
@@ -315,7 +328,7 @@ function epicRow(e, showRisk = true) {
     </td>
     <td style="font-size:12px">${consumed}h / ${e.orig??'?'}h</td>
     <td style="font-size:12px;font-weight:700">${e.cur}h</td>
-    ${showRisk ? `<td>${badgeHTML(e.risk)}</td><td style="font-size:11px">${e.riskSince}</td>` : ''}
+    ${showRisk ? `<td>${badgeHTML(e.risk)}</td><td style="font-size:11px">${firstSprint}</td>` : ''}
     <td><button class="chart-btn" onclick="event.stopPropagation();openModal('${e.id}')">📈 Voir</button></td>
   </tr>`;
 }
@@ -336,7 +349,7 @@ function renderTables() {
   document.getElementById('tbl-done').innerHTML =
     tableHeader(false) + '<tbody>' + groups.done.map(e => {
       const p = pct(e);
-      const consumed = e.orig ? (e.orig - e.cur) : '—';
+      const consumed = Math.round(e.consumed.reduce((s, v) => s + (v ?? 0), 0) * 10) / 10;
       return `<tr class="clickable row-done" onclick="openModal('${e.id}')">
         <td><strong>${e.id}</strong><br><span style="color:#555;font-size:11px">${e.name}</span></td>
         <td style="font-size:12px">${e.manager}</td>
@@ -347,7 +360,7 @@ function renderTables() {
             <span class="prog-pct" style="color:#adb5bd">${p}%</span>
           </div>
         </td>
-        <td style="font-size:12px">${consumed}h / ${e.orig??'?'}h</td>
+        <td style="font-size:12px">${consumed > 0 ? consumed+'h' : '\u2014'} / ${e.orig??'?'}h</td>
         <td style="font-size:12px;font-weight:700">${e.cur}h</td>
         <td><button class="chart-btn" onclick="event.stopPropagation();openModal('${e.id}')">📈 Voir</button></td>
       </tr>`;
@@ -386,7 +399,7 @@ function renderCards() {
   const g = {critical:0, watch:0, ok:0, done:0};
   EPICS.forEach(e => g[e.risk]++);
   const first = SPRINT_LABELS[0] ?? '?';
-  const last  = SPRINT_LABELS[SPRINT_LABELS.length - 2] ?? '?'; // last before 'Actuel'
+  const last  = SPRINT_LABELS[SPRINT_LABELS.length - 1] ?? '?';
   document.getElementById('cards').innerHTML = `
     <div class="card red">   <div class="count">${g.critical}</div><div class="label">Critiques</div><div class="desc">Bloqu&eacute;es ou sans allocation</div></div>
     <div class="card orange"><div class="count">${g.watch}</div><div class="label">&Agrave; surveiller</div><div class="desc">Allocation insuffisante</div></div>
@@ -541,13 +554,13 @@ function openModal(epicId) {
      <span>${statusBadge}</span>
      <span>📋 ${e.stateLabel}</span>`;
 
-  const consumed = e.orig ? (e.orig - e.cur) : 0;
-  const p = pct(e);
+  const consumed = Math.round(e.consumed.reduce((s, v) => s + (v ?? 0), 0) * 10) / 10;
+  const p = e.orig ? Math.round(consumed / e.orig * 100) : (e.cur === 0 ? 100 : 0);
   const sprintCount = SPRINT_LABELS.length - 1;
   document.getElementById('modal-stats').innerHTML = `
-    <div class="modal-stat"><div class="sv" style="color:#283593">${e.orig??'?'}h</div><div class="sl">Estimé initial</div></div>
-    <div class="modal-stat"><div class="sv" style="color:#28a745">${consumed}h</div><div class="sl">Consommé (${p}%)</div></div>
-    <div class="modal-stat"><div class="sv" style="color:${p<40?'#dc3545':p<70?'#fd7e14':'#28a745'}">${e.cur}h</div><div class="sl">Restant actuel</div></div>
+    <div class="modal-stat"><div class="sv" style="color:#111">${e.orig??'?'}h</div><div class="sl">Estimé initial</div></div>
+    <div class="modal-stat"><div class="sv" style="color:#9333ea">${consumed}h</div><div class="sl">Consommé (${p}%)</div></div>
+    <div class="modal-stat"><div class="sv" style="color:#1a237e">${e.cur}h</div><div class="sl">Restant réel</div></div>
     <div class="modal-stat"><div class="sv" style="color:#555">${e.allocation.reduce((s,h)=>s+h,0).toFixed(0)}h</div><div class="sl">Total planifié ${SPRINT_LABELS[0]}–${SPRINT_LABELS[sprintCount-1]}</div></div>`;
 
   const noteEl = document.getElementById('modal-note');
@@ -568,9 +581,10 @@ function renderChart(e) {
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
   const ctx = document.getElementById('modal-chart').getContext('2d');
 
-  const allocData    = [...e.allocation, 0];
-  const consumedData = [...(e.consumed || []), null]; // null for 'Actuel' point
-  const remData      = e.remaining.map(v => v === null ? null : v);
+  const n            = SPRINT_LABELS.length - 1;
+  const allocData    = e.allocation;
+  const consumedData = e.consumed || [];
+  const remData      = e.remaining.slice(0, n).map(v => v === null ? null : v);
 
   const expectedRem = remData.map((_, i) => {
     if (i === 0) return remData[0];
@@ -594,7 +608,7 @@ function renderChart(e) {
   chartInstance = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: SPRINT_LABELS,
+      labels: SPRINT_LABELS.slice(0, n),
       datasets: [
         {
           label: 'Allocation planifiée (h)',
@@ -615,6 +629,23 @@ function renderChart(e) {
           order: 4,
         },
         {
+          label: 'Heures restantes (réelles)',
+          data: remData,
+          type: 'line',
+          borderColor: '#1a237e',
+          backgroundColor: 'rgba(26,35,126,0.07)',
+          borderWidth: 2.5,
+          pointBackgroundColor: ptColor,
+          pointBorderColor: ptColor,
+          pointRadius: ptRadius,
+          pointHoverRadius: 8,
+          fill: true,
+          tension: 0.15,
+          yAxisID: 'y',
+          order: 1,
+          spanGaps: false,
+        },
+        {
           label: 'Restantes attendues (si tout consommé)',
           data: expectedRem,
           type: 'line',
@@ -631,23 +662,6 @@ function renderChart(e) {
           yAxisID: 'y',
           order: 2,
           spanGaps: false,
-        },
-        {
-          label: 'Heures restantes (réelles)',
-          data: remData,
-          type: 'line',
-          borderColor: '#1a237e',
-          backgroundColor: 'rgba(26,35,126,0.07)',
-          borderWidth: 2.5,
-          pointBackgroundColor: ptColor,
-          pointBorderColor: ptColor,
-          pointRadius: ptRadius,
-          pointHoverRadius: 8,
-          fill: true,
-          tension: 0.15,
-          yAxisID: 'y',
-          order: 1,
-          spanGaps: false,
         }
       ]
     },
@@ -655,10 +669,14 @@ function renderChart(e) {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
+      onClick(event, elements) {
+        if (elements.length > 0) openEpicDrillModal(e.id, elements[0].index);
+      },
       plugins: {
-        legend: { position: 'top', labels: { font: { size: 12 }, boxWidth: 14 } },
+        legend: { display: false },
         tooltip: {
           callbacks: {
+            footer: () => ['\uD83D\uDD0D Cliquer pour voir le d\u00e9tail par r\u00e9alisateur'],
             afterBody(items) {
               const si = items[0]?.dataIndex ?? -1;
               if (si < 1) return [];
@@ -838,6 +856,140 @@ function renderDevChart(d) {
 }
 
 // ═══════════════════════════════════════════════════
+//  EPIC DRILL-DOWN — Planifié vs Consommé par réalisateur
+// ═══════════════════════════════════════════════════
+let epicDrillChartInstance = null;
+
+function openEpicDrillModal(epicId, sprintIdx) {
+  const sprintLabel = SPRINT_LABELS[sprintIdx] ?? ('S' + (sprintIdx + 1));
+
+  // Collect per-developer data for this epic at this sprint from DEV_STATS
+  const devData = [];
+  (DEV_STATS || []).forEach(dev => {
+    const details = dev.epicDetails && dev.epicDetails[sprintIdx];
+    if (!details) return;
+    const entry = details.find(e => e.id === epicId);
+    if (!entry) return;
+    if (entry.consumed > 0 || entry.planned > 0)
+      devData.push({ name: dev.name, consumed: entry.consumed, planned: entry.planned });
+  });
+
+  document.getElementById('epic-drill-modal-title').textContent =
+    '\uD83D\uDD0D ' + epicId + ' \u2014 ' + sprintLabel + ' : Planifi\u00e9 vs Saisi par r\u00e9alisateur';
+  document.getElementById('epic-drill-modal-meta').innerHTML = '';
+  document.getElementById('epic-drill-modal').classList.add('open');
+
+  if (devData.length === 0) {
+    document.getElementById('epic-drill-modal-chart').style.display = 'none';
+    document.getElementById('epic-drill-chart-legend').innerHTML =
+      '<span style="color:#888;font-style:italic">Aucune donn\u00e9e r\u00e9alisateur disponible pour cet \u00e9pic \u00e0 ce sprint.</span>';
+    return;
+  }
+  document.getElementById('epic-drill-modal-chart').style.display = '';
+
+  const totalCons = Math.round(devData.reduce((s, d) => s + d.consumed, 0) * 10) / 10;
+  const totalPlan = Math.round(devData.reduce((s, d) => s + d.planned, 0) * 10) / 10;
+
+  document.getElementById('epic-drill-modal-meta').innerHTML =
+    `<span>Total saisi\u00a0: <strong>${totalCons}h</strong></span>
+     <span>Total planifi\u00e9\u00a0: <strong>${totalPlan}h</strong></span>
+     <span>Sprint\u00a0: <strong>${sprintLabel}</strong></span>`;
+
+  renderEpicDrillChart(devData, epicId, sprintLabel);
+}
+
+function closeEpicDrillModal(evt) {
+  if (evt && evt.target !== document.getElementById('epic-drill-modal')) return;
+  document.getElementById('epic-drill-modal').classList.remove('open');
+  if (epicDrillChartInstance) { epicDrillChartInstance.destroy(); epicDrillChartInstance = null; }
+}
+
+function renderEpicDrillChart(devData, epicId, sprintLabel) {
+  if (epicDrillChartInstance) { epicDrillChartInstance.destroy(); epicDrillChartInstance = null; }
+  const ctx = document.getElementById('epic-drill-modal-chart').getContext('2d');
+
+  const labels   = devData.map(d => d.name);
+  const consumed = devData.map(d => d.consumed);
+  const planned  = devData.map(d => d.planned);
+  const deltas   = devData.map(d => Math.round((d.consumed - d.planned) * 10) / 10);
+
+  const allVals = [...consumed, ...planned].filter(v => v > 0);
+  const yMax    = allVals.length ? Math.ceil(Math.max(...allVals) * 1.2 / 5) * 5 : 50;
+
+  epicDrillChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Planifi\u00e9 (h)',
+          data: planned,
+          backgroundColor: planned.map(v => v > 0 ? 'rgba(66,133,244,0.45)' : 'rgba(200,200,200,0.12)'),
+          borderColor:     planned.map(v => v > 0 ? 'rgba(66,133,244,0.80)' : 'rgba(180,180,180,0.25)'),
+          borderWidth: 1.5,
+          order: 1,
+        },
+        {
+          label: 'Saisi Redmine (h)',
+          data: consumed,
+          backgroundColor: consumed.map(v => v > 0 ? 'rgba(192,132,252,0.65)' : 'rgba(200,200,200,0.12)'),
+          borderColor:     consumed.map(v => v > 0 ? 'rgba(147,51,234,0.9)'   : 'rgba(180,180,180,0.25)'),
+          borderWidth: 1.5,
+          order: 2,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            font: { size: 12 }, boxWidth: 14,
+            generateLabels(chart) {
+              const items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+              if (items[0]) { items[0].fillStyle = 'rgba(66,133,244,0.45)'; items[0].strokeStyle = 'rgba(66,133,244,0.80)'; }
+              return items;
+            }
+          }
+        },
+        tooltip: {
+          callbacks: {
+            afterBody(items) {
+              const i = items[0]?.dataIndex ?? -1;
+              if (i < 0) return [];
+              const delta = deltas[i];
+              if (delta > 0.05)  return ['\u25b2 D\u00e9passement\u00a0: +' + delta + 'h vs planifi\u00e9'];
+              if (delta < -0.05) return ['\u25bc Sous-saisie\u00a0: ' + delta + 'h vs planifi\u00e9'];
+              if (planned[i] === 0 && consumed[i] > 0) return ['Saisi sans planification associ\u00e9e'];
+              return ['\u2713 Conforme au planifi\u00e9'];
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          min: 0, max: yMax,
+          title: { display: true, text: 'Heures', font: { size: 11 }, color: '#444' },
+          ticks: { font: { size: 11 } },
+          grid:  { color: 'rgba(0,0,0,0.06)' }
+        },
+        x: { ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+
+  document.getElementById('epic-drill-chart-legend').innerHTML =
+    `<span style="color:#666;font-style:italic">
+       Planifi\u00e9\u00a0= allocation Excel par r\u00e9alisateur (AllocationsByEpicAndSprint).
+       Saisi\u00a0= heures Redmine.
+       Seuls les r\u00e9alisateurs avec au moins une saisie Redmine ce sprint sont affich\u00e9s.
+     </span>`;
+}
+
+// ═══════════════════════════════════════════════════
 //  DRILL-DOWN — Planifié vs Consommé par epic
 // ═══════════════════════════════════════════════════
 let drillChartInstance = null;
@@ -875,7 +1027,7 @@ function renderDrillChart(details, devName, sprintLabel) {
   if (drillChartInstance) { drillChartInstance.destroy(); drillChartInstance = null; }
   const ctx = document.getElementById('drill-modal-chart').getContext('2d');
 
-  const labels   = details.map(e => e.name ? e.id + ' \u2014 ' + e.name.substring(0, 22) : e.id);
+  const labels   = details.map(e => e.id);
   const consumed = details.map(e => e.consumed);
   const planned  = details.map(e => e.planned);
   const deltas   = details.map(e => Math.round((e.consumed - e.planned) * 10) / 10);
@@ -911,9 +1063,26 @@ function renderDrillChart(details, devName, sprintLabel) {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top', labels: { font: { size: 12 }, boxWidth: 14 } },
+        legend: {
+          position: 'top',
+          labels: {
+            font: { size: 12 }, boxWidth: 14,
+            generateLabels(chart) {
+              const items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+              // Planned dataset (index 0) must always show blue regardless of per-bar colors
+              if (items[0]) { items[0].fillStyle = 'rgba(66,133,244,0.45)'; items[0].strokeStyle = 'rgba(66,133,244,0.80)'; }
+              return items;
+            }
+          }
+        },
         tooltip: {
           callbacks: {
+            title(items) {
+              const i = items[0]?.dataIndex ?? -1;
+              if (i < 0) return '';
+              const e = details[i];
+              return e.name ? e.id + ' \u2014 ' + e.name : e.id;
+            },
             afterBody(items) {
               const i = items[0]?.dataIndex ?? -1;
               if (i < 0) return [];
@@ -1018,7 +1187,7 @@ document.querySelectorAll('.collapsible').forEach(el => {
   el.style.maxHeight = el.scrollHeight + 9999 + 'px';
 });
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDrillModal(); closeDevModal(); closeModal(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeEpicDrillModal(); closeDrillModal(); closeDevModal(); closeModal(); } });
 
 // ═══════════════════════════════════════════════════
 //  INIT
@@ -1065,9 +1234,10 @@ setTimeout(() => {
 
     private static string BuildSprintLabelsJs(EpicAnalysisReportModel m)
     {
-        // SPRINT_LABELS = [...sprint labels, 'Actuel']  (n+1 entries, matches remaining array length)
+        // SPRINT_LABELS has n+1 entries so that SPRINT_LABELS.length - 1 = n everywhere.
+        // The extra entry is never shown directly in charts (each chart uses .slice(0, n)).
         var labels = m.SprintLabels.Select(l => $"'{JsStr(l)}'").ToList();
-        labels.Add("'Actuel'");
+        labels.Add(labels.LastOrDefault() ?? "'?'");
         string dates      = "[" + string.Join(",", m.SprintDates.Select(d        => $"'{JsStr(d)}'"))        + "]";
         string startFull  = "[" + string.Join(",", m.SprintStartDatesFull.Select(d => $"'{JsStr(d)}'"))      + "]";
         string endFull    = "[" + string.Join(",", m.SprintEndDatesFull.Select(d   => $"'{JsStr(d)}'"))      + "]";

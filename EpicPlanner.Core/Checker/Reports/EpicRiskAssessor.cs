@@ -90,6 +90,16 @@ public static class EpicRiskAssessor
             return ("watch", sprintLabels[firstAllocSprint],
                 "Démarrage tardif dans le plan");
 
+        // ── Watch: last sprint under-consumption (< 80% of allocation) ──────────
+        if (n >= 1 && allocation[n - 1] > 0
+            && remaining[n - 1].HasValue && remaining[n].HasValue)
+        {
+            double lastConsumed = Math.Max(0, remaining[n - 1]!.Value - remaining[n]!.Value);
+            if (lastConsumed < allocation[n - 1] * 0.80)
+                return ("watch", sprintLabels[n - 1],
+                    $"Sous-consommation au dernier sprint ({lastConsumed:F0}h saisies vs {allocation[n - 1]:F0}h planifiées)");
+        }
+
         return ("ok", "—", string.Empty);
     }
 }
