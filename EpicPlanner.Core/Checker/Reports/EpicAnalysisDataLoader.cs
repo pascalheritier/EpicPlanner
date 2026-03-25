@@ -1,4 +1,5 @@
 using EpicPlanner.Core.Configuration;
+using EpicPlanner.Core.Shared.Services;
 using OfficeOpenXml;
 using System.Text.RegularExpressions;
 
@@ -30,7 +31,9 @@ public class EpicAnalysisDataLoader
         int SprintNumber,
         DateTime SprintStart,
         IReadOnlyDictionary<string, double> InitialRemaining,
-        IReadOnlyDictionary<string, double> Allocated);
+        IReadOnlyDictionary<string, double> Allocated,
+        /// <summary>resource (Excel name) → epicId → hours planned this sprint.</summary>
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, double>> AllocatedByResource);
 
     #endregion
 
@@ -60,7 +63,7 @@ public class EpicAnalysisDataLoader
 
     #region Public API
 
-    public Task<EpicAnalysisReportModel> LoadAsync()
+    public async Task<EpicAnalysisReportModel> LoadAsync()
     {
         string sprintFolder = m_Config.FileConfiguration.SprintPlanningFolderPath;
 
@@ -70,8 +73,20 @@ public class EpicAnalysisDataLoader
         List<CurrentEpicRow> currentEpics = ReadCurrentEpics(epicFilePath);
 
         int n = history.Count;
+        int sprintDaysCfg = m_Config.PlannerConfiguration.SprintDays;
+
         List<string> sprintLabels = history.Select(h => $"S{h.SprintNumber}").ToList();
         List<string> sprintDates  = history.Select(h => FormatSprintDate(h.SprintStart)).ToList();
+
+        List<string> sprintStartFull = history
+            .Select(h => h.SprintStart.ToString("dd/MM/yyyy"))
+            .ToList();
+        List<string> sprintEndFull = history
+            .Select((h, i) => (i < n - 1
+                ? history[i + 1].SprintStart.AddDays(-1)
+                : h.SprintStart.AddDays(sprintDaysCfg - 1))
+                .ToString("dd/MM/yyyy"))
+            .ToList();
 
         HashSet<string> historicalIds = new(
             history.SelectMany(h => h.InitialRemaining.Keys.Concat(h.Allocated.Keys)),
@@ -126,18 +141,103 @@ public class EpicAnalysisDataLoader
             consumptions.Sort((a, b) => s_IdComparer.Compare(a.EpicId, b.EpicId));
         }
 
-        return Task.FromResult(new EpicAnalysisReportModel
+        // Fetch consumed hours per developer per sprint from Redmine time entries.
+        List<DeveloperSprintStats> developerStats = new();
+        if (n > 0 && !string.IsNullOrWhiteSpace(m_Config.RedmineConfiguration.ServerUrl))
+        {
+            try
+            {
+                int sprintDays = m_Config.PlannerConfiguration.SprintDays;
+                var sprintRanges = history
+                    .Select((h, i) => (
+                        Start: h.SprintStart,
+                        End:   i < n - 1
+                               ? history[i + 1].SprintStart.AddDays(-1)
+                               : h.SprintStart.AddDays(sprintDays - 1)))
+                    .ToList();
+
+                var fetcher = new RedmineDataFetcher(
+                    m_Config.RedmineConfiguration.ServerUrl,
+                    m_Config.RedmineConfiguration.ApiKey);
+
+                // consumedByDev[devName][sprintIdx][epicFullName] = hours
+                Dictionary<string, Dictionary<string, double>[]> consumedByDev =
+                    await fetcher.GetConsumedHoursPerDeveloperAsync(sprintRanges).ConfigureAwait(false);
+
+                developerStats = consumedByDev
+                    .OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(kv =>
+                    {
+                        string devName = kv.Key;
+                        double[] totalConsumed = new double[n];
+                        var epicDetails = new List<DeveloperEpicDetail>[n];
+                        for (int i = 0; i < n; i++) epicDetails[i] = new();
+
+                        for (int i = 0; i < n; i++)
+                        {
+                            Dictionary<string, double> epicConsumed = kv.Value[i];
+
+                            // Per-dev planned hours from AllocationsByEpicAndSprint for this sprint
+                            IReadOnlyDictionary<string, double>? devPlanned = null;
+                            history[i].AllocatedByResource.TryGetValue(devName, out devPlanned);
+
+                            foreach (string epicFull in epicConsumed.Keys)
+                            {
+                                double hours = epicConsumed[epicFull];
+
+                                if (epicFull == "(No Epic)")
+                                {
+                                    totalConsumed[i] = Math.Round(totalConsumed[i] + hours, 1);
+                                    continue;
+                                }
+
+                                string epicId = ExtractEpicId(epicFull);
+                                double planned = (devPlanned != null &&
+                                                  devPlanned.TryGetValue(epicId, out double p)) ? p : 0;
+
+                                totalConsumed[i] = Math.Round(totalConsumed[i] + hours, 1);
+                                epicDetails[i].Add(new DeveloperEpicDetail
+                                {
+                                    EpicId   = string.IsNullOrEmpty(epicId) ? epicFull : epicId,
+                                    EpicName = ExtractShortName(epicFull),
+                                    Consumed = hours,
+                                    Planned  = planned,
+                                });
+                            }
+
+                            epicDetails[i].Sort((a, b) => s_IdComparer.Compare(a.EpicId, b.EpicId));
+                        }
+
+                        return new DeveloperSprintStats
+                        {
+                            Name        = devName,
+                            Consumed    = totalConsumed,
+                            EpicDetails = epicDetails,
+                        };
+                    })
+                    .ToList();
+            }
+            catch
+            {
+                // Non-fatal: developer stats will be empty if Redmine is unreachable.
+            }
+        }
+
+        return new EpicAnalysisReportModel
         {
             Epics = mainEntries,
             Pipeline = pipelineEntries,
             EpicConsumptions = consumptions,
+            DeveloperStats = developerStats,
             SprintLabels = sprintLabels,
             SprintDates = sprintDates,
+            SprintStartDatesFull = sprintStartFull,
+            SprintEndDatesFull   = sprintEndFull,
             GeneratedAt = DateTime.Now,
             CurrentSprintLabel = lastSprint,
             CurrentSprintDateRange = history.LastOrDefault() is { } last
                 ? last.SprintStart.ToString("dd MMM yyyy") : string.Empty
-        });
+        };
     }
 
     #endregion
@@ -229,18 +329,25 @@ public class EpicAnalysisDataLoader
         {
             using var package = new ExcelPackage(new FileInfo(filePath));
 
-            var initialRemaining = new Dictionary<string, double>(s_IdComparer);
-            var allocated        = new Dictionary<string, double>(s_IdComparer);
-            DateTime sprintStart = DateTime.MinValue;
+            var initialRemaining  = new Dictionary<string, double>(s_IdComparer);
+            var allocated         = new Dictionary<string, double>(s_IdComparer);
+            var allocatedByRes    = new Dictionary<string, Dictionary<string, double>>(StringComparer.OrdinalIgnoreCase);
+            DateTime sprintStart  = DateTime.MinValue;
 
             ReadFinalSchedule(package, initialRemaining);
             ReadAllocationsByEpicPerSprint(package, sprintNumber, allocated, ref sprintStart);
+            ReadAllocationsByEpicAndSprint(package, sprintNumber, allocatedByRes);
 
-            // If we couldn't get the date from allocations, try to infer it
             if (sprintStart == DateTime.MinValue)
                 sprintStart = InferSprintStartFromFinalSchedule(package);
 
-            return new SprintFileData(sprintNumber, sprintStart, initialRemaining, allocated);
+            // Convert inner dicts to read-only
+            var roByRes = allocatedByRes.ToDictionary(
+                kv => kv.Key,
+                kv => (IReadOnlyDictionary<string, double>)kv.Value,
+                StringComparer.OrdinalIgnoreCase);
+
+            return new SprintFileData(sprintNumber, sprintStart, initialRemaining, allocated, roByRes);
         }
         catch
         {
@@ -327,6 +434,58 @@ public class EpicAnalysisDataLoader
             string id = ExtractEpicId(epicName);
             if (!string.IsNullOrWhiteSpace(id))
                 target[id] = target.TryGetValue(id, out double existing) ? existing + hours.Value : hours.Value;
+        }
+    }
+
+    /// <summary>
+    /// Reads AllocationsByEpicAndSprint (Epic, Sprint, Resource, Hours) for a given sprint number
+    /// and populates <paramref name="target"/>: resource → epicId → hours.
+    /// </summary>
+    private static void ReadAllocationsByEpicAndSprint(
+        ExcelPackage package,
+        int targetSprintNumber,
+        Dictionary<string, Dictionary<string, double>> target)
+    {
+        ExcelWorksheet? ws = package.Workbook.Worksheets["AllocationsByEpicAndSprint"];
+        if (ws?.Dimension is null) return;
+
+        int colEpic = 1, colSprint = 2, colResource = 3, colHours = 4;
+        int maxCol = ws.Dimension.End.Column;
+        for (int c = 1; c <= maxCol; c++)
+        {
+            string? h = ws.Cells[1, c].GetValue<string>()?.Trim();
+            if (h is null) continue;
+            if (h.StartsWith("Epic",     StringComparison.OrdinalIgnoreCase)) colEpic     = c;
+            else if (h.Equals("Sprint",  StringComparison.OrdinalIgnoreCase)) colSprint   = c;
+            else if (h.StartsWith("Resource", StringComparison.OrdinalIgnoreCase)) colResource = c;
+            else if (h.StartsWith("Hours",    StringComparison.OrdinalIgnoreCase)) colHours    = c;
+        }
+
+        int maxRow = ws.Dimension.End.Row;
+        for (int r = 2; r <= maxRow; r++)
+        {
+            int? sprint = ws.Cells[r, colSprint].GetValue<int?>()
+                       ?? (int?)TryParseDouble(ws.Cells[r, colSprint].Text);
+            if (sprint != targetSprintNumber) continue;
+
+            string? epicName = ws.Cells[r, colEpic].GetValue<string>()?.Trim();
+            string? resource = ws.Cells[r, colResource].GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(epicName) || string.IsNullOrWhiteSpace(resource)) continue;
+
+            double? hours = ws.Cells[r, colHours].GetValue<double?>()
+                         ?? TryParseDouble(ws.Cells[r, colHours].Text);
+            if (hours is null || hours <= 0) continue;
+
+            string epicId = ExtractEpicId(epicName);
+            if (string.IsNullOrWhiteSpace(epicId)) continue;
+
+            if (!target.TryGetValue(resource, out var epicDict))
+            {
+                epicDict = new Dictionary<string, double>(s_IdComparer);
+                target[resource] = epicDict;
+            }
+            epicDict.TryGetValue(epicId, out double existing);
+            epicDict[epicId] = Math.Round(existing + hours.Value, 1);
         }
     }
 
@@ -554,7 +713,7 @@ public class EpicAnalysisDataLoader
         return "pending";
     }
 
-    private static string FormatSprintDate(DateTime d) =>
+private static string FormatSprintDate(DateTime d) =>
         d == DateTime.MinValue ? "?" :
         d.ToString("MMM", System.Globalization.CultureInfo.GetCultureInfo("fr-FR")) + "'" + d.ToString("yy");
 

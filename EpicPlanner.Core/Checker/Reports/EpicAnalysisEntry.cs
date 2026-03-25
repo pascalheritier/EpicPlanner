@@ -77,6 +77,34 @@ public class EpicConsumptionEntry
 
 
 /// <summary>
+/// Per-epic detail for one developer in one sprint.
+/// </summary>
+public class DeveloperEpicDetail
+{
+    public string EpicId   { get; set; } = string.Empty;
+    public string EpicName { get; set; } = string.Empty;
+    /// <summary>Hours charged on this epic (Redmine time entries).</summary>
+    public double Consumed { get; set; }
+    /// <summary>Hours allocated to this epic (Excel, pro-rated by assignee count).</summary>
+    public double Planned  { get; set; }
+}
+
+/// <summary>
+/// Consumed hours per sprint for one developer, sourced from Redmine time entries.
+/// </summary>
+public class DeveloperSprintStats
+{
+    /// <summary>Canonical Redmine user name.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Total hours charged per sprint (one value per historical sprint).</summary>
+    public double[] Consumed { get; set; } = Array.Empty<double>();
+
+    /// <summary>Per-sprint epic breakdown. Index matches SprintLabels.</summary>
+    public List<DeveloperEpicDetail>[] EpicDetails { get; set; } = Array.Empty<List<DeveloperEpicDetail>>();
+}
+
+/// <summary>
 /// Root model returned by <see cref="EpicAnalysisDataLoader"/> and consumed by
 /// <see cref="EpicAnalysisHtmlGenerator"/>.
 /// </summary>
@@ -85,8 +113,11 @@ public class EpicAnalysisReportModel
     public List<EpicAnalysisEntry> Epics    { get; set; } = new();
     public List<PipelineEpicEntry> Pipeline { get; set; } = new();
 
-    /// <summary>Current-sprint consumption per epic (from Redmine). Empty if Redmine data not available.</summary>
+    /// <summary>Current-sprint consumption per epic (from Excel). Empty if no sprint files found.</summary>
     public List<EpicConsumptionEntry> EpicConsumptions      { get; set; } = new();
+
+    /// <summary>Consumed hours per developer per sprint (from Redmine time entries). Empty if Redmine unavailable.</summary>
+    public List<DeveloperSprintStats> DeveloperStats         { get; set; } = new();
 
     /// <summary>Label of the sprint for which Redmine consumption data was fetched (e.g. "S84").</summary>
     public string EpicConsumptionSprintLabel { get; set; } = string.Empty;
@@ -96,6 +127,12 @@ public class EpicAnalysisReportModel
 
     /// <summary>One human-readable date per sprint, e.g. ["oct'25","nov'25",…]</summary>
     public List<string> SprintDates         { get; set; } = new();
+
+    /// <summary>Full start date per sprint in dd/MM/yyyy format.</summary>
+    public List<string> SprintStartDatesFull { get; set; } = new();
+
+    /// <summary>Full end date per sprint in dd/MM/yyyy format.</summary>
+    public List<string> SprintEndDatesFull   { get; set; } = new();
 
     public DateTime GeneratedAt             { get; set; }
     public string   CurrentSprintLabel      { get; set; } = string.Empty;

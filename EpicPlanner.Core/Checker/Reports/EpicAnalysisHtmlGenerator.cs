@@ -187,6 +187,11 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
   <table class="epic-table" id="tbl-consumption"></table>
 </div>
 
+<div class="section-title section-toggle" onclick="toggleSection('sec-calendar')">&#128197; Calendrier des sprints</div>
+<div id="sec-calendar" class="collapsible">
+  <table class="epic-table" id="tbl-calendar"></table>
+</div>
+
 <div class="section-title section-toggle" onclick="toggleSection('sec-devstats')">&#128101; R&eacute;alisateurs &mdash; Planifi&eacute; vs Consomm&eacute; par sprint</div>
 <div id="sec-devstats" class="collapsible">
   <table class="epic-table" id="tbl-devstats"></table>
@@ -219,6 +224,16 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
   </div>
 </div>
 
+<div class="modal-overlay" id="drill-modal" onclick="closeDrillModal(event)" style="z-index:1100">
+  <div class="modal" id="drill-modal-box">
+    <button class="modal-close" onclick="closeDrillModal()">&#10005;</button>
+    <h2 id="drill-modal-title"></h2>
+    <div class="meta-row" id="drill-modal-meta"></div>
+    <div class="chart-container" style="height:380px"><canvas id="drill-modal-chart"></canvas></div>
+    <div id="drill-chart-legend" style="margin-top:10px;font-size:11px;color:#555;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 10px;background:#f8f9ff;border-radius:6px;border:1px solid #e8eaf6"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal" onclick="closeModal(event)">
   <div class="modal" id="modal-box">
     <button class="modal-close" onclick="closeModal()">&#10005;</button>
@@ -239,6 +254,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
         sb.Append(BuildEpicsJs(m));
         sb.Append(BuildPipelineJs(m));
         sb.Append(BuildConsumptionJs(m));
+        sb.Append(BuildDevStatsJs(m));
 
         // All JS logic (rendering + chart)
         sb.Append($$"""
@@ -466,8 +482,11 @@ function renderHeatmap() {
   const sorted = [...EPICS].sort((a,b) => order.indexOf(a.risk) - order.indexOf(b.risk));
   const sprintCount = SPRINT_LABELS.length - 1; // exclude 'Actuel'
 
-  const sprintHeaders = SPRINT_LABELS.slice(0, sprintCount)
-    .map((s,i) => `<th>${s}<br><small style="font-weight:400;opacity:.75">${SPRINT_DATES[i]??''}</small></th>`).join('');
+  const sprintHeaders = SPRINT_LABELS.slice(0, sprintCount).map((s, i) => {
+    const s1 = SPRINT_START_DATES[i], s2 = SPRINT_END_DATES[i];
+    const tip = (s1 && s2) ? ` title="${s1} \u2192 ${s2}"` : '';
+    return `<th${tip}>${s}<br><small style="font-weight:400;opacity:.75">${SPRINT_DATES[i]??''}</small></th>`;
+  }).join('');
 
   let html = `<thead><tr>
     <th class="left">Epic</th>${sprintHeaders}
@@ -703,76 +722,31 @@ function renderChart(e) {
 }
 
 // ═══════════════════════════════════════════════════
-//  DEV STATS — Planifié vs Consommé par réalisateur
+//  DEV STATS — Consommé par réalisateur (Redmine)
 // ═══════════════════════════════════════════════════
-function computeDevStats() {
-  const n = SPRINT_LABELS.length - 1; // number of historical sprints (exclude 'Actuel')
-  const devMap = new Map();
-
-  EPICS.forEach(e => {
-    // Assigned field may be comma, slash, or semicolon separated
-    const raw = (e.assigned || '').trim();
-    const assignees = raw ? raw.split(/[,\/;]+/).map(s => s.trim()).filter(s => s) : [];
-    if (assignees.length === 0) return;
-    const share = 1 / assignees.length;
-
-    assignees.forEach(dev => {
-      if (!devMap.has(dev)) {
-        devMap.set(dev, {
-          name:     dev,
-          planned:  new Array(n).fill(0),
-          consumed: new Array(n).fill(null)
-        });
-      }
-      const st = devMap.get(dev);
-      for (let i = 0; i < n; i++) {
-        const alloc = (e.allocation && e.allocation[i] != null) ? e.allocation[i] : 0;
-        st.planned[i] = Math.round((st.planned[i] + alloc * share) * 10) / 10;
-      }
-      for (let i = 0; i < n; i++) {
-        const cons = (e.consumed && e.consumed[i] != null) ? e.consumed[i] : null;
-        if (cons !== null) {
-          st.consumed[i] = Math.round(((st.consumed[i] ?? 0) + cons * share) * 10) / 10;
-        }
-      }
-    });
-  });
-
-  return Array.from(devMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-let DEV_STATS = null;
-
 function renderDevTable() {
-  DEV_STATS = computeDevStats();
+  if (!DEV_STATS || DEV_STATS.length === 0) {
+    document.getElementById('tbl-devstats').innerHTML =
+      '<tbody><tr><td colspan="4" style="padding:10px;color:#888;font-style:italic">Aucune donn\u00e9e Redmine disponible.</td></tr></tbody>';
+    return;
+  }
+
   const header = `<thead><tr>
     <th style="min-width:170px">R&eacute;alisateur</th>
-    <th>Total planifi&eacute; (h)</th>
     <th>Total consomm&eacute; (h)</th>
-    <th>Taux de consommation</th>
     <th>Sprints actifs</th>
     <th>Graphique</th>
   </tr></thead>`;
 
   const rows = DEV_STATS.map(d => {
-    const totalPlan = Math.round(d.planned.reduce((s, v) => s + (v || 0), 0) * 10) / 10;
-    const totalCons = Math.round(d.consumed.reduce((s, v) => s + (v ?? 0), 0) * 10) / 10;
-    const rate = totalPlan > 0.01 ? Math.round(totalCons / totalPlan * 100) : (totalCons > 0 ? 999 : 0);
-    const activeCount = d.planned.filter(v => v > 0).length;
-    const rateColor = rate < 70 ? '#dc3545' : rate > 130 ? '#fd7e14' : '#28a745';
-    const bar = totalPlan > 0
-      ? `<div class="prog-wrap">
-           <div class="prog-bar"><div class="prog-fill ${rate<70?'red':rate>130?'orange':'green'}" style="width:${Math.min(rate,100)}%"></div></div>
-           <span class="prog-pct" style="color:${rateColor}">${rate}%</span>
-         </div>`
-      : '<span style="color:#aaa;font-size:11px">—</span>';
-    return `<tr class="clickable" onclick="openDevModal('${d.name.replace(/'/g,"\\'")}')">
+    const totalCons   = Math.round(d.consumed.reduce((s, v) => s + (v ?? 0), 0) * 10) / 10;
+    const activeCount = d.consumed.filter(v => v > 0).length;
+    const safeName    = d.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return `<tr class="clickable" onclick="openDevModal('${safeName}')">
       <td><strong>${d.name}</strong></td>
-      <td style="font-size:12px">${totalPlan > 0 ? totalPlan+'h' : '—'}</td>
       <td style="font-size:12px;font-weight:700">${totalCons > 0 ? totalCons+'h' : '—'}</td>
-      <td>${bar}</td>
       <td style="font-size:12px;color:#666">${activeCount} sprint${activeCount!==1?'s':''}</td>
-      <td><button class="chart-btn" onclick="event.stopPropagation();openDevModal('${d.name.replace(/'/g,"\\'")}')">📊 Voir</button></td>
+      <td><button class="chart-btn" onclick="event.stopPropagation();openDevModal('${safeName}')">📊 Voir</button></td>
     </tr>`;
   }).join('');
 
@@ -785,21 +759,18 @@ function openDevModal(devName) {
   const d = DEV_STATS && DEV_STATS.find(x => x.name === devName);
   if (!d) return;
 
-  document.getElementById('dev-modal-title').textContent = '👤 ' + d.name + ' — Planifié vs Consommé';
+  document.getElementById('dev-modal-title').textContent = '\uD83D\uDC64 ' + d.name + ' — Heures saisies par sprint';
 
   const n = SPRINT_LABELS.length - 1;
-  const totalPlan = Math.round(d.planned.reduce((s, v) => s + (v || 0), 0) * 10) / 10;
-  const totalCons = Math.round(d.consumed.reduce((s, v) => s + (v ?? 0), 0) * 10) / 10;
-  const activeSprints = d.planned.filter(v => v > 0).length;
-  const rate = totalPlan > 0.01 ? Math.round(totalCons / totalPlan * 100) : (totalCons > 0 ? 999 : 0);
+  const totalCons   = Math.round(d.consumed.reduce((s, v) => s + (v ?? 0), 0) * 10) / 10;
+  const activeSprints = d.consumed.filter(v => v > 0).length;
   document.getElementById('dev-modal-meta').innerHTML =
-    `<span>📅 ${activeSprints} sprints actifs</span>
-     <span>📋 Sprints : ${SPRINT_LABELS[0] ?? '?'} → ${SPRINT_LABELS[n-1] ?? '?'}</span>`;
+    `<span>\uD83D\uDCC5 ${activeSprints} sprints avec saisies</span>
+     <span>\uD83D\uDCCB Sprints : ${SPRINT_LABELS[0] ?? '?'} \u2192 ${SPRINT_LABELS[n > 0 ? n-1 : 0] ?? '?'}</span>`;
 
   document.getElementById('dev-modal-stats').innerHTML = `
-    <div class="modal-stat"><div class="sv" style="color:#283593">${totalPlan}h</div><div class="sl">Total planifié</div></div>
-    <div class="modal-stat"><div class="sv" style="color:#28a745">${totalCons}h</div><div class="sl">Total consommé</div></div>
-    <div class="modal-stat"><div class="sv" style="color:${rate<70?'#dc3545':rate>130?'#fd7e14':'#28a745'}">${rate}%</div><div class="sl">Taux consommation</div></div>`;
+    <div class="modal-stat"><div class="sv" style="color:#6d28d9">${totalCons}h</div><div class="sl">Total saisi (Redmine)</div></div>
+    <div class="modal-stat"><div class="sv" style="color:#555">${activeSprints}</div><div class="sl">Sprints actifs</div></div>`;
 
   document.getElementById('dev-modal').classList.add('open');
   renderDevChart(d);
@@ -817,29 +788,121 @@ function renderDevChart(d) {
   const n = SPRINT_LABELS.length - 1;
   const labels = SPRINT_LABELS.slice(0, n);
 
-  const allVals = [...d.planned, ...d.consumed.map(v => v ?? 0)].filter(v => v > 0);
+  const allVals = d.consumed.filter(v => v != null && v > 0);
   const yMax = allVals.length ? Math.ceil(Math.max(...allVals) * 1.15 / 10) * 10 : 100;
 
+  const devName = d.name;
   devChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Heures saisies (Redmine)',
+        data: d.consumed,
+        backgroundColor: d.consumed.map(v => (v ?? 0) > 0 ? 'rgba(192,132,252,0.65)' : 'rgba(200,200,200,0.15)'),
+        borderColor:     d.consumed.map(v => (v ?? 0) > 0 ? 'rgba(147,51,234,0.9)'   : 'rgba(180,180,180,0.3)'),
+        borderWidth: 1.5,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      onClick(event, elements) {
+        if (elements.length > 0) openDrillModal(devName, elements[0].index);
+      },
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 12 }, boxWidth: 14 } },
+        tooltip: {
+          callbacks: {
+            footer: () => ['\uD83D\uDD0D Cliquer pour voir le d\u00e9tail par epic']
+          }
+        }
+      },
+      scales: {
+        y: {
+          type: 'linear',
+          min: 0,
+          max: yMax,
+          title: { display: true, text: 'Heures saisies', font: { size: 11 }, color: '#444' },
+          ticks: { font: { size: 11 } },
+          grid: { color: 'rgba(0,0,0,0.06)' }
+        },
+        x: { ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+
+  document.getElementById('dev-chart-legend').innerHTML =
+    `<span style="color:#666;font-style:italic">Source\u00a0: saisies d\u2019heures Redmine sur l\u2019ensemble des t\u00e2ches de chaque sprint.</span>`;
+}
+
+// ═══════════════════════════════════════════════════
+//  DRILL-DOWN — Planifié vs Consommé par epic
+// ═══════════════════════════════════════════════════
+let drillChartInstance = null;
+
+function openDrillModal(devName, sprintIdx) {
+  const d = DEV_STATS && DEV_STATS.find(x => x.name === devName);
+  if (!d) return;
+  const details = d.epicDetails && d.epicDetails[sprintIdx];
+  if (!details || details.length === 0) {
+    alert('Aucun d\u00e9tail disponible pour ce sprint.');
+    return;
+  }
+  const sprintLabel = SPRINT_LABELS[sprintIdx] ?? ('S' + (sprintIdx + 1));
+  document.getElementById('drill-modal-title').textContent =
+    '\uD83D\uDD0D ' + devName + ' \u2014 ' + sprintLabel + ' : Planifi\u00e9 vs Saisi par epic';
+
+  const totalCons = Math.round(details.reduce((s, e) => s + e.consumed, 0) * 10) / 10;
+  const totalPlan = Math.round(details.reduce((s, e) => s + e.planned,  0) * 10) / 10;
+  document.getElementById('drill-modal-meta').innerHTML =
+    `<span>Total saisi\u00a0: <strong>${totalCons}h</strong></span>
+     <span>Total planifi\u00e9\u00a0: <strong>${totalPlan}h</strong></span>
+     <span>Sprint\u00a0: <strong>${sprintLabel}</strong></span>`;
+
+  document.getElementById('drill-modal').classList.add('open');
+  renderDrillChart(details, devName, sprintLabel);
+}
+
+function closeDrillModal(evt) {
+  if (evt && evt.target !== document.getElementById('drill-modal')) return;
+  document.getElementById('drill-modal').classList.remove('open');
+  if (drillChartInstance) { drillChartInstance.destroy(); drillChartInstance = null; }
+}
+
+function renderDrillChart(details, devName, sprintLabel) {
+  if (drillChartInstance) { drillChartInstance.destroy(); drillChartInstance = null; }
+  const ctx = document.getElementById('drill-modal-chart').getContext('2d');
+
+  const labels   = details.map(e => e.id + (e.name ? ' \u2014 ' + e.name.substring(0, 22) : ''));
+  const consumed = details.map(e => e.consumed);
+  const planned  = details.map(e => e.planned);
+  const deltas   = details.map(e => Math.round((e.consumed - e.planned) * 10) / 10);
+
+  const allVals = [...consumed, ...planned].filter(v => v > 0);
+  const yMax    = allVals.length ? Math.ceil(Math.max(...allVals) * 1.2 / 5) * 5 : 50;
+
+  drillChartInstance = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
       datasets: [
         {
-          label: 'Planifié (h)',
-          data: d.planned,
-          backgroundColor: d.planned.map(h => h > 0 ? 'rgba(66,133,244,0.45)' : 'rgba(200,200,200,0.15)'),
-          borderColor:     d.planned.map(h => h > 0 ? 'rgba(66,133,244,0.80)' : 'rgba(180,180,180,0.30)'),
-          borderWidth: 1.5,
-          order: 2,
-        },
-        {
-          label: 'Consommé réel (h)',
-          data: d.consumed,
-          backgroundColor: 'rgba(192,132,252,0.55)',
-          borderColor:     'rgba(147,51,234,0.85)',
+          label: 'Planifi\u00e9 (h)',
+          data: planned,
+          backgroundColor: planned.map(v => v > 0 ? 'rgba(66,133,244,0.45)' : 'rgba(200,200,200,0.12)'),
+          borderColor:     planned.map(v => v > 0 ? 'rgba(66,133,244,0.80)' : 'rgba(180,180,180,0.25)'),
           borderWidth: 1.5,
           order: 1,
+        },
+        {
+          label: 'Saisi Redmine (h)',
+          data: consumed,
+          backgroundColor: consumed.map(v => v > 0 ? 'rgba(192,132,252,0.65)' : 'rgba(200,200,200,0.12)'),
+          borderColor:     consumed.map(v => v > 0 ? 'rgba(147,51,234,0.9)'   : 'rgba(180,180,180,0.25)'),
+          borderWidth: 1.5,
+          order: 2,
         },
       ]
     },
@@ -852,48 +915,72 @@ function renderDevChart(d) {
         tooltip: {
           callbacks: {
             afterBody(items) {
-              const si = items[0]?.dataIndex ?? -1;
-              if (si < 0) return [];
-              const plan = d.planned[si] ?? 0;
-              const cons = d.consumed[si];
-              if (cons === null || cons === undefined) return ['Consommé : données non disponibles'];
-              if (plan > 0.01) {
-                const r = Math.round(cons / plan * 100);
-                if (r < 70)       return [`⚠️ Sous-consommation : ${r}% du planifié`];
-                if (r > 130)      return [`⚠️ Dépassement : ${r}% du planifié`];
-                return [`✓ ${r}% du planifié consommé`];
-              }
-              if (cons > 0) return ['Heures saisies sans planification'];
-              return [];
+              const i = items[0]?.dataIndex ?? -1;
+              if (i < 0) return [];
+              const delta = deltas[i];
+              if (delta > 0.05)       return ['\u25b2 D\u00e9passement : +' + delta + 'h vs planifi\u00e9'];
+              if (delta < -0.05)      return ['\u25bc Sous-saisie : ' + delta + 'h vs planifi\u00e9'];
+              if (planned[i] === 0 && consumed[i] > 0) return ['Saisi sans planification associ\u00e9e'];
+              return ['\u2713 Conforme au planifi\u00e9'];
             }
           }
         }
       },
       scales: {
         y: {
-          type: 'linear',
-          min: 0,
-          max: yMax,
+          min: 0, max: yMax,
           title: { display: true, text: 'Heures', font: { size: 11 }, color: '#444' },
           ticks: { font: { size: 11 } },
-          grid: { color: 'rgba(0,0,0,0.06)' }
+          grid:  { color: 'rgba(0,0,0,0.06)' }
         },
-        x: { ticks: { font: { size: 11 } } }
+        x: { ticks: { font: { size: 10 }, maxRotation: 40 } }
       }
     }
   });
 
-  document.getElementById('dev-chart-legend').innerHTML =
-    `<strong>Lecture :</strong>
-     <span style="display:inline-flex;align-items:center;gap:5px">
-       <span style="display:inline-block;width:14px;height:14px;background:rgba(66,133,244,0.45);border:1px solid rgba(66,133,244,0.8);border-radius:2px"></span>
-       Planifié
-     </span>
-     <span style="display:inline-flex;align-items:center;gap:5px">
-       <span style="display:inline-block;width:14px;height:14px;background:rgba(192,132,252,0.55);border:1px solid rgba(147,51,234,0.85);border-radius:2px"></span>
-       Consommé réel
-     </span>
-     <span style="color:#666;font-style:italic">— Les heures sont proratisées en cas d'affectation multiple sur un epic.</span>`;
+  document.getElementById('drill-chart-legend').innerHTML =
+    `<span style="color:#666;font-style:italic">
+       Planifi\u00e9\u00a0= allocation Excel de ce r\u00e9alisateur sur cette \u00e9pic pour ce sprint (feuille AllocationsByEpicAndSprint).
+       Saisi\u00a0= heures saisies dans Redmine par ce r\u00e9alisateur.
+     </span>`;
+}
+
+// ═══════════════════════════════════════════════════
+//  CALENDAR — Sprint start/end dates
+// ═══════════════════════════════════════════════════
+function renderCalendar() {
+  const n = SPRINT_LABELS.length - 1; // exclude 'Actuel'
+  const header = `<thead><tr>
+    <th style="min-width:80px">Sprint</th>
+    <th>Mois</th>
+    <th>D\u00e9but</th>
+    <th>Fin</th>
+    <th style="text-align:center">Dur\u00e9e (j)</th>
+  </tr></thead>`;
+
+  const rows = SPRINT_LABELS.slice(0, n).map((label, i) => {
+    const start = SPRINT_START_DATES[i] ?? '\u2014';
+    const end   = SPRINT_END_DATES[i]   ?? '\u2014';
+    const month = SPRINT_DATES[i]       ?? '\u2014';
+
+    let duration = '\u2014';
+    if (start !== '\u2014' && end !== '\u2014') {
+      const [ds, ms, ys] = start.split('/').map(Number);
+      const [de, me, ye] = end.split('/').map(Number);
+      const diff = (new Date(ye, me - 1, de) - new Date(ys, ms - 1, ds)) / 86400000;
+      duration = Math.round(diff) + 1;
+    }
+
+    return `<tr>
+      <td><strong>${label}</strong></td>
+      <td style="font-size:12px;color:#666">${month}</td>
+      <td style="font-size:12px">${start}</td>
+      <td style="font-size:12px">${end}</td>
+      <td style="font-size:12px;text-align:center">${duration}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('tbl-calendar').innerHTML = header + '<tbody>' + rows + '</tbody>';
 }
 
 // ═══════════════════════════════════════════════════
@@ -931,7 +1018,7 @@ document.querySelectorAll('.collapsible').forEach(el => {
   el.style.maxHeight = el.scrollHeight + 9999 + 'px';
 });
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeDevModal(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDrillModal(); closeDevModal(); closeModal(); } });
 
 // ═══════════════════════════════════════════════════
 //  INIT
@@ -940,6 +1027,7 @@ renderCards();
 renderTables();
 renderPipeline();
 renderConsumptions();
+renderCalendar();
 renderDevTable();
 renderHeatmap();
 
@@ -980,9 +1068,13 @@ setTimeout(() => {
         // SPRINT_LABELS = [...sprint labels, 'Actuel']  (n+1 entries, matches remaining array length)
         var labels = m.SprintLabels.Select(l => $"'{JsStr(l)}'").ToList();
         labels.Add("'Actuel'");
-        string dates = "[" + string.Join(",", m.SprintDates.Select(d => $"'{JsStr(d)}'")) + "]";
-        return $"const SPRINT_LABELS = [{string.Join(",", labels)}];\n"
-             + $"const SPRINT_DATES  = {dates};\n\n";
+        string dates      = "[" + string.Join(",", m.SprintDates.Select(d        => $"'{JsStr(d)}'"))        + "]";
+        string startFull  = "[" + string.Join(",", m.SprintStartDatesFull.Select(d => $"'{JsStr(d)}'"))      + "]";
+        string endFull    = "[" + string.Join(",", m.SprintEndDatesFull.Select(d   => $"'{JsStr(d)}'"))      + "]";
+        return $"const SPRINT_LABELS      = [{string.Join(",", labels)}];\n"
+             + $"const SPRINT_DATES       = {dates};\n"
+             + $"const SPRINT_START_DATES = {startFull};\n"
+             + $"const SPRINT_END_DATES   = {endFull};\n\n";
     }
 
     private static string BuildEpicsJs(EpicAnalysisReportModel m)
@@ -1029,6 +1121,36 @@ setTimeout(() => {
                 $"{{id:'{JsStr(p.Id)}', name:'{JsStr(p.Name)}', manager:'{JsStr(p.Manager)}'," +
                 $" analyst:'{JsStr(p.Analyst)}', state:'{JsStr(p.State)}'," +
                 $" rough:{rough}, deps:'{JsStr(p.Dependencies)}', notes:'{JsStr(p.Notes)}'}},");
+        }
+        sb.Append("];\n\n");
+        return sb.ToString();
+    }
+
+    private static string BuildDevStatsJs(EpicAnalysisReportModel m)
+    {
+        var ic = System.Globalization.CultureInfo.InvariantCulture;
+        var sb = new StringBuilder();
+        sb.Append("const DEV_STATS = [\n");
+        foreach (DeveloperSprintStats d in m.DeveloperStats)
+        {
+            string cons = "[" + string.Join(",", d.Consumed.Select(v => v.ToString("F1", ic))) + "]";
+
+            // epicDetails: array (one per sprint) of arrays of {epicId, epicName, consumed, planned}
+            var detailsJs = new StringBuilder("[");
+            for (int i = 0; i < d.EpicDetails.Length; i++)
+            {
+                detailsJs.Append("[");
+                foreach (DeveloperEpicDetail ed in d.EpicDetails[i])
+                {
+                    detailsJs.Append(
+                        $"{{id:'{JsStr(ed.EpicId)}',name:'{JsStr(ed.EpicName)}'," +
+                        $"consumed:{ed.Consumed.ToString("F1", ic)},planned:{ed.Planned.ToString("F1", ic)}}},");
+                }
+                detailsJs.Append("],");
+            }
+            detailsJs.Append("]");
+
+            sb.AppendLine($"  {{name:'{JsStr(d.Name)}',consumed:{cons},epicDetails:{detailsJs}}},");
         }
         sb.Append("];\n\n");
         return sb.ToString();

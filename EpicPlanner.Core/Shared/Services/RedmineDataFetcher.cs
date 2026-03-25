@@ -425,6 +425,78 @@ public class RedmineDataFetcher
         return false;
     }
 
+    /// <summary>
+    /// Fetches all time entries for the date range covering the given sprints.
+    /// Returns consumed hours per developer per sprint, with per-epic breakdown.
+    /// Key = canonical Redmine user name.
+    /// Value[sprintIndex] = dict(epicFullName → hours).
+    /// </summary>
+    public async Task<Dictionary<string, Dictionary<string, double>[]>> GetConsumedHoursPerDeveloperAsync(
+        IReadOnlyList<(DateTime Start, DateTime End)> _SprintRanges)
+    {
+        if (_SprintRanges.Count == 0)
+            return new Dictionary<string, Dictionary<string, double>[]>(StringComparer.OrdinalIgnoreCase);
+
+        DateTime overallStart = _SprintRanges.Min(r => r.Start);
+        DateTime overallEnd   = _SprintRanges.Max(r => r.End);
+
+        List<TimeEntryRecord> entries = await GetTimeEntriesAsync(overallStart, overallEnd).ConfigureAwait(false);
+
+        int n = _SprintRanges.Count;
+        var result = new Dictionary<string, Dictionary<string, double>[]>(StringComparer.OrdinalIgnoreCase);
+        var parentCache = new Dictionary<int, Issue>();
+
+        foreach (TimeEntryRecord entry in entries)
+        {
+            if (entry?.Hours <= 0) continue;
+            string? userName = entry?.User?.Name;
+            if (string.IsNullOrWhiteSpace(userName)) continue;
+            if (entry!.Issue == null || entry.Issue.Id <= 0) continue;
+
+            int sprintIdx = -1;
+            for (int i = 0; i < n; i++)
+            {
+                if (entry.SpentOn >= _SprintRanges[i].Start && entry.SpentOn <= _SprintRanges[i].End)
+                { sprintIdx = i; break; }
+            }
+            if (sprintIdx < 0) continue;
+
+            // Resolve issue → epic: fetch full issue (cached) then resolve descriptor
+            string epicName;
+            try
+            {
+                int issueId = entry.Issue.Id;
+                if (!parentCache.TryGetValue(issueId, out Issue? fullIssue))
+                {
+                    fullIssue = await GetIssueByIdAsync(issueId).ConfigureAwait(false)
+                                ?? throw new InvalidOperationException($"Issue {issueId} not found in Redmine.");
+                    parentCache[issueId] = fullIssue;
+                }
+                EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(fullIssue, parentCache).ConfigureAwait(false);
+                epicName = descriptor.Name;
+            }
+            catch { epicName = "(No Epic)"; }
+
+            if (!result.TryGetValue(userName!, out var sprintDicts))
+            {
+                sprintDicts = new Dictionary<string, double>[n];
+                for (int i = 0; i < n; i++) sprintDicts[i] = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+                result[userName!] = sprintDicts;
+            }
+
+            sprintDicts[sprintIdx].TryGetValue(epicName, out double existing);
+            sprintDicts[sprintIdx][epicName] = existing + entry.Hours;
+        }
+
+        // Round
+        foreach (var sprintDicts in result.Values)
+            foreach (var dict in sprintDicts)
+                foreach (string key in dict.Keys.ToList())
+                    dict[key] = Math.Round(dict[key], 1);
+
+        return result;
+    }
+
     private async Task<List<TimeEntryRecord>> GetTimeEntriesAsync(DateTime _SprintStart, DateTime _SprintEnd)
     {
         var results = new List<TimeEntryRecord>();
@@ -580,12 +652,15 @@ public class RedmineDataFetcher
 
     private async Task<Issue?> GetIssueByIdAsync(int _iIssueId)
     {
-        var parameters = new NameValueCollection
+        try
         {
-            { RedmineKeys.ISSUE_ID, _iIssueId.ToString(CultureInfo.InvariantCulture) }
-        };
-
-        return (await GetIssuesAsync(parameters)).FirstOrDefault();
+            return await m_RedmineManager.GetAsync<Issue>(
+                _iIssueId.ToString(CultureInfo.InvariantCulture), null).ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static EpicDescriptor CreateDescriptor(EpicCustomFieldValue _Value)
@@ -1032,12 +1107,24 @@ public class RedmineDataFetcher
 
         [JsonPropertyName("issue")]
         public TimeEntryIssueReference? Issue { get; set; }
+
+        [JsonPropertyName("user")]
+        public TimeEntryUserReference? User { get; set; }
     }
 
     private sealed class TimeEntryIssueReference
     {
         [JsonPropertyName("id")]
         public int Id { get; set; }
+    }
+
+    private sealed class TimeEntryUserReference
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
     }
 
     private static int TryParseEnumerationId(string? _strValue)
