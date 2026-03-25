@@ -184,10 +184,19 @@ public class EpicAnalysisDataLoader
                             foreach (string epicFull in epicConsumed.Keys)
                             {
                                 double hours = epicConsumed[epicFull];
+                                totalConsumed[i] = Math.Round(totalConsumed[i] + hours, 1);
 
-                                if (epicFull == "(No Epic)")
+                                // Special buckets: no planned hours, show as-is in drill-down
+                                bool isSpecial = epicFull is "Maintenance" or "[Analyse]" or "[Suivi]";
+                                if (isSpecial)
                                 {
-                                    totalConsumed[i] = Math.Round(totalConsumed[i] + hours, 1);
+                                    epicDetails[i].Add(new DeveloperEpicDetail
+                                    {
+                                        EpicId   = epicFull,
+                                        EpicName = string.Empty,
+                                        Consumed = hours,
+                                        Planned  = 0,
+                                    });
                                     continue;
                                 }
 
@@ -195,7 +204,6 @@ public class EpicAnalysisDataLoader
                                 double planned = (devPlanned != null &&
                                                   devPlanned.TryGetValue(epicId, out double p)) ? p : 0;
 
-                                totalConsumed[i] = Math.Round(totalConsumed[i] + hours, 1);
                                 epicDetails[i].Add(new DeveloperEpicDetail
                                 {
                                     EpicId   = string.IsNullOrEmpty(epicId) ? epicFull : epicId,

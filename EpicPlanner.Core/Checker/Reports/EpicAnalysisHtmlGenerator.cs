@@ -875,7 +875,7 @@ function renderDrillChart(details, devName, sprintLabel) {
   if (drillChartInstance) { drillChartInstance.destroy(); drillChartInstance = null; }
   const ctx = document.getElementById('drill-modal-chart').getContext('2d');
 
-  const labels   = details.map(e => e.id + (e.name ? ' \u2014 ' + e.name.substring(0, 22) : ''));
+  const labels   = details.map(e => e.name ? e.id + ' \u2014 ' + e.name.substring(0, 22) : e.id);
   const consumed = details.map(e => e.consumed);
   const planned  = details.map(e => e.planned);
   const deltas   = details.map(e => Math.round((e.consumed - e.planned) * 10) / 10);

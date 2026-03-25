@@ -446,6 +446,28 @@ public class RedmineDataFetcher
         var result = new Dictionary<string, Dictionary<string, double>[]>(StringComparer.OrdinalIgnoreCase);
         var parentCache = new Dictionary<int, Issue>();
 
+        // Pre-fetch all unique leaf issue IDs in parallel to avoid sequential Redmine calls.
+        // Up to 10 concurrent requests; results are merged into parentCache before the main loop.
+        var leafIds = entries
+            .Where(e => e?.Issue?.Id > 0)
+            .Select(e => e.Issue.Id)
+            .Distinct()
+            .ToList();
+
+        using (var semaphore = new SemaphoreSlim(10))
+        {
+            var prefetchTasks = leafIds.Select(async id =>
+            {
+                await semaphore.WaitAsync().ConfigureAwait(false);
+                try   { return (id, Issue: await GetIssueByIdAsync(id).ConfigureAwait(false)); }
+                catch { return (id, Issue: (Issue?)null); }
+                finally { semaphore.Release(); }
+            });
+
+            foreach (var (id, issue) in await Task.WhenAll(prefetchTasks).ConfigureAwait(false))
+                if (issue != null) parentCache[id] = issue;
+        }
+
         foreach (TimeEntryRecord entry in entries)
         {
             if (entry?.Hours <= 0) continue;
@@ -461,7 +483,7 @@ public class RedmineDataFetcher
             }
             if (sprintIdx < 0) continue;
 
-            // Resolve issue → epic: fetch full issue (cached) then resolve descriptor
+            // Resolve issue → epic bucket
             string epicName;
             try
             {
@@ -472,10 +494,20 @@ public class RedmineDataFetcher
                                 ?? throw new InvalidOperationException($"Issue {issueId} not found in Redmine.");
                     parentCache[issueId] = fullIssue;
                 }
-                EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(fullIssue, parentCache).ConfigureAwait(false);
-                epicName = descriptor.Name;
+
+                // [Analyse] / [Suivi] issues are counted in dedicated buckets, not under an epic
+                string subject = fullIssue.Subject ?? string.Empty;
+                if (subject.Contains("[Analyse]", StringComparison.OrdinalIgnoreCase))
+                    epicName = "[Analyse]";
+                else if (subject.Contains("[Suivi]", StringComparison.OrdinalIgnoreCase))
+                    epicName = "[Suivi]";
+                else
+                {
+                    EpicDescriptor descriptor = await ResolveEpicDescriptorAsync(fullIssue, parentCache).ConfigureAwait(false);
+                    epicName = descriptor.Name == "(No Epic)" ? "Maintenance" : descriptor.Name;
+                }
             }
-            catch { epicName = "(No Epic)"; }
+            catch { epicName = "Maintenance"; }
 
             if (!result.TryGetValue(userName!, out var sprintDicts))
             {
