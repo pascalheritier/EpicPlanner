@@ -38,27 +38,24 @@ public class CheckingRunner
 
     public async Task<string> RunAsync(EnumCheckerMode _enumMode)
     {
-        CheckerPlanningSnapshot snapshot = await m_DataProvider.LoadCheckerSnapshotAsync();
-        CheckerSimulator simulator = snapshot.CreateCheckerSimulator();
-        simulator.Run();
         string outputPath = ResolveOutputPath(_enumMode);
-        simulator.ExportCheckerReport(outputPath, _enumMode);
 
         if (_enumMode == EnumCheckerMode.EpicStates)
         {
-            await GenerateEpicAnalysisHtmlAsync();
+            EpicAnalysisReportModel analysisModel = await m_AnalysisDataLoader.LoadAsync();
+            analysisModel.EpicConsumptionSprintLabel =
+                $"S{m_AppConfiguration.PlannerConfiguration.InitialSprintNumber}";
+            m_AnalysisHtmlGenerator.Generate(analysisModel, outputPath);
+        }
+        else
+        {
+            CheckerPlanningSnapshot snapshot = await m_DataProvider.LoadCheckerSnapshotAsync();
+            CheckerSimulator simulator = snapshot.CreateCheckerSimulator();
+            simulator.Run();
+            simulator.ExportCheckerReport(outputPath, _enumMode);
         }
 
         return outputPath;
-    }
-
-    private async Task GenerateEpicAnalysisHtmlAsync()
-    {
-        string htmlPath = m_AppConfiguration.EpicAnalysisReportConfiguration.OutputHtmlPath;
-        if (string.IsNullOrWhiteSpace(htmlPath)) return;
-
-        EpicAnalysisReportModel model = await m_AnalysisDataLoader.LoadAsync();
-        m_AnalysisHtmlGenerator.Generate(model, htmlPath);
     }
 
     #endregion

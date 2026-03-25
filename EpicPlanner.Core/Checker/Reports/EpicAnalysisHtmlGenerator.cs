@@ -16,8 +16,10 @@ public class EpicAnalysisHtmlGenerator
 
     private static string BuildHtml(EpicAnalysisReportModel m)
     {
-        string firstSprint = m.SprintLabels.FirstOrDefault() ?? "?";
-        string lastSprint  = m.SprintLabels.LastOrDefault()  ?? "?";
+        string firstSprint   = m.SprintLabels.FirstOrDefault() ?? "?";
+        string lastSprint    = m.SprintLabels.LastOrDefault()  ?? "?";
+        string currentSprint = string.IsNullOrWhiteSpace(m.EpicConsumptionSprintLabel)
+            ? lastSprint : m.EpicConsumptionSprintLabel;
         string generated   = m.GeneratedAt.ToString("dd MMMM yyyy",
             System.Globalization.CultureInfo.GetCultureInfo("fr-FR"));
 
@@ -150,6 +152,11 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
 
 <div class="cards" id="cards"></div>
 
+<div style="display:flex;justify-content:flex-end;margin-bottom:6px;gap:8px">
+  <button class="chart-btn" onclick="expandAll()" style="padding:5px 12px;font-size:12px">&#9660; Tout d&eacute;plier</button>
+  <button class="chart-btn" onclick="collapseAll()" style="padding:5px 12px;font-size:12px">&#9650; Tout r&eacute;duire</button>
+</div>
+
 <div class="section-title section-toggle" onclick="toggleSection('sec-critical')">&#128308; Epics critiques &mdash; Retard significatif ou allocation arr&ecirc;t&eacute;e</div>
 <div id="sec-critical" class="collapsible">
   <table class="epic-table" id="tbl-critical"></table>
@@ -175,7 +182,18 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
   <table class="epic-table" id="tbl-pipeline"></table>
 </div>
 
-<div class="section-title">&#128202; Heatmap des allocations planifi&eacute;es par sprint (toutes les epics)</div>
+<div class="section-title section-toggle" onclick="toggleSection('sec-consumption')">&#9889; Consommation {{currentSprint}} &mdash; donn&eacute;es Redmine</div>
+<div id="sec-consumption" class="collapsible">
+  <table class="epic-table" id="tbl-consumption"></table>
+</div>
+
+<div class="section-title section-toggle" onclick="toggleSection('sec-devstats')">&#128101; R&eacute;alisateurs &mdash; Planifi&eacute; vs Consomm&eacute; par sprint</div>
+<div id="sec-devstats" class="collapsible">
+  <table class="epic-table" id="tbl-devstats"></table>
+</div>
+
+<div class="section-title section-toggle" onclick="toggleSection('sec-heatmap')">&#128202; Heatmap des allocations planifi&eacute;es par sprint (toutes les epics)</div>
+<div id="sec-heatmap" class="collapsible">
 <table class="hm-table" id="heatmap"></table>
 <div class="legend-row">
   <div class="leg"><div class="leg-box" style="background:#c8e6c9;border:1px solid #aed6b1"></div>&gt; 80h planifi&eacute;es</div>
@@ -185,8 +203,20 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
   <div class="leg"><div class="leg-box" style="background:#e8f5e9;border:1px solid #a5d6a7"></div>Epic termin&eacute;e ce sprint</div>
   <div class="leg"><div class="leg-box" style="background:#f9f9f9;border:1px solid #ddd"></div>Non active</div>
 </div>
+</div>
 
 <div class="footnote">Sources&nbsp;: <em>Planification_des_Epics.xlsx</em> &middot; <em>Sprint_XX_vN.xlsx</em> ({{firstSprint}}&ndash;{{lastSprint}}, derni&egrave;res versions) &middot; Graphiques n&eacute;cessitent une connexion internet (Chart.js CDN)</div>
+</div>
+
+<div class="modal-overlay" id="dev-modal" onclick="closeDevModal(event)">
+  <div class="modal" id="dev-modal-box">
+    <button class="modal-close" onclick="closeDevModal()">&#10005;</button>
+    <h2 id="dev-modal-title"></h2>
+    <div class="meta-row" id="dev-modal-meta"></div>
+    <div class="chart-container"><canvas id="dev-modal-chart"></canvas></div>
+    <div class="modal-stats" id="dev-modal-stats"></div>
+    <div id="dev-chart-legend" style="margin-top:10px;font-size:11px;color:#555;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 10px;background:#f8f9ff;border-radius:6px;border:1px solid #e8eaf6"></div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="modal" onclick="closeModal(event)">
@@ -208,6 +238,7 @@ body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; color: #
         sb.Append(BuildSprintLabelsJs(m));
         sb.Append(BuildEpicsJs(m));
         sb.Append(BuildPipelineJs(m));
+        sb.Append(BuildConsumptionJs(m));
 
         // All JS logic (rendering + chart)
         sb.Append($$"""
@@ -349,6 +380,85 @@ function renderCards() {
 }
 
 // ═══════════════════════════════════════════════════
+//  CONSUMPTION (current sprint, per epic, Redmine)
+// ═══════════════════════════════════════════════════
+function renderConsumptions() {
+  if (!EPIC_CONSUMPTIONS || EPIC_CONSUMPTIONS.length === 0) {
+    document.getElementById('tbl-consumption').innerHTML =
+      '<tbody><tr><td colspan="7" style="padding:10px;color:#888;font-style:italic">Aucune donnée Redmine disponible pour ce sprint.</td></tr></tbody>';
+    return;
+  }
+
+  const header = `<thead><tr>
+    <th style="min-width:170px">Epic</th>
+    <th>Planifi&eacute; (h)</th>
+    <th>Consomm&eacute; (h)</th>
+    <th>Restant Redmine (h)</th>
+    <th style="min-width:120px">Taux utilisation</th>
+    <th>D&eacute;passement (h)</th>
+    <th>Observation</th>
+  </tr></thead>`;
+
+  // Sort: under-consumed with allocation first, then overhead, then ok, then no plan
+  const sorted = [...EPIC_CONSUMPTIONS].sort((a, b) => {
+    const scoreA = consumptionScore(a), scoreB = consumptionScore(b);
+    if (scoreA !== scoreB) return scoreA - scoreB;
+    return a.epicId.localeCompare(b.epicId);
+  });
+
+  const rows = sorted.map(e => {
+    const usagePct = e.usageRatePct;
+    const isUnder  = e.planned > 0 && usagePct < 80;
+    const isOver   = usagePct > 120;
+    const rowCls   = isUnder ? 'row-red' : isOver ? 'row-orange' : e.planned > 0 ? 'row-green' : '';
+
+    const bar = e.planned > 0
+      ? `<div class="prog-wrap">
+           <div class="prog-bar"><div class="prog-fill ${isUnder?'red':isOver?'orange':'green'}" style="width:${Math.min(usagePct,100)}%"></div></div>
+           <span class="prog-pct" style="color:${isUnder?'#dc3545':isOver?'#fd7e14':'#28a745'}">${usagePct.toFixed(0)}%</span>
+         </div>`
+      : '<span style="color:#aaa;font-size:11px">—</span>';
+
+    const ovStyle = e.overhead > 0 ? 'color:#dc3545;font-weight:700'
+                  : e.overhead < 0 ? 'color:#28a745'
+                  : 'color:#aaa';
+    const ovText  = e.overhead > 0 ? '+'+e.overhead+'h' : e.overhead < 0 ? e.overhead+'h' : '—';
+
+    const obs = consumptionObs(e);
+
+    return `<tr class="${rowCls}">
+      <td><strong>${e.epicId}</strong><br><span style="color:#555;font-size:11px">${e.epicName}</span></td>
+      <td style="font-size:12px">${e.planned > 0 ? e.planned+'h' : '—'}</td>
+      <td style="font-size:12px;font-weight:700">${e.consumed}h</td>
+      <td style="font-size:12px">${e.remaining}h</td>
+      <td>${bar}</td>
+      <td style="font-size:12px;${ovStyle}">${ovText}</td>
+      <td style="font-size:11px;color:#666">${obs}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('tbl-consumption').innerHTML = header + '<tbody>' + rows + '</tbody>';
+}
+
+function consumptionScore(e) {
+  if (e.planned <= 0) return 3;
+  if (e.usageRatePct < 80) return 0;
+  if (e.usageRatePct > 120) return 1;
+  return 2;
+}
+
+function consumptionObs(e) {
+  if (e.planned <= 0 && e.consumed > 0) return 'Heures saisies sans planification associée.';
+  if (e.planned <= 0) return 'Non planifié dans ce sprint.';
+  if (e.consumed === 0) return 'Aucune heure saisie — planification non consommée.';
+  if (e.usageRatePct < 50) return 'Forte sous-consommation (&lt; 50% du planifié).';
+  if (e.usageRatePct < 80) return 'Sous-consommation (&lt; 80% du planifié).';
+  if (e.usageRatePct > 120) return 'Dépassement du planifié.';
+  if (e.overhead > 0) return 'Restant Redmine supérieur au prévu — probable sous-estimation.';
+  return '';
+}
+
+// ═══════════════════════════════════════════════════
 //  HEATMAP
 // ═══════════════════════════════════════════════════
 function renderHeatmap() {
@@ -439,8 +549,9 @@ function renderChart(e) {
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
   const ctx = document.getElementById('modal-chart').getContext('2d');
 
-  const allocData = [...e.allocation, 0];
-  const remData   = e.remaining.map(v => v === null ? null : v);
+  const allocData    = [...e.allocation, 0];
+  const consumedData = [...(e.consumed || []), null]; // null for 'Actuel' point
+  const remData      = e.remaining.map(v => v === null ? null : v);
 
   const expectedRem = remData.map((_, i) => {
     if (i === 0) return remData[0];
@@ -469,11 +580,20 @@ function renderChart(e) {
         {
           label: 'Allocation planifiée (h)',
           data: allocData,
-          backgroundColor: allocData.map(h => h > 0 ? 'rgba(66,133,244,0.50)' : 'rgba(200,200,200,0.18)'),
+          backgroundColor: allocData.map(h => h > 0 ? 'rgba(66,133,244,0.45)' : 'rgba(200,200,200,0.15)'),
           borderColor:     allocData.map(h => h > 0 ? 'rgba(66,133,244,0.80)' : 'rgba(180,180,180,0.30)'),
           borderWidth: 1.5,
           yAxisID: 'y',
           order: 3,
+        },
+        {
+          label: 'Consommé réel (h)',
+          data: consumedData,
+          backgroundColor: 'rgba(192,132,252,0.55)',
+          borderColor: 'rgba(147,51,234,0.85)',
+          borderWidth: 1.5,
+          yAxisID: 'y',
+          order: 4,
         },
         {
           label: 'Restantes attendues (si tout consommé)',
@@ -560,6 +680,14 @@ function renderChart(e) {
   document.getElementById('chart-bar-legend').innerHTML =
     `<strong>Lecture :</strong>
      <span style="display:inline-flex;align-items:center;gap:5px">
+       <span style="display:inline-block;width:14px;height:14px;background:rgba(66,133,244,0.45);border:1px solid rgba(66,133,244,0.8);border-radius:2px"></span>
+       Allocation planifiée
+     </span>
+     <span style="display:inline-flex;align-items:center;gap:5px">
+       <span style="display:inline-block;width:14px;height:14px;background:rgba(192,132,252,0.55);border:1px solid rgba(147,51,234,0.85);border-radius:2px"></span>
+       Consommé réel
+     </span>
+     <span style="display:inline-flex;align-items:center;gap:5px">
        <svg width="26" height="10"><line x1="0" y1="5" x2="26" y2="5" stroke="#1a237e" stroke-width="2.5"/></svg>
        Restantes réelles
      </span>
@@ -571,7 +699,201 @@ function renderChart(e) {
        <span style="color:#e53935;font-size:14px;line-height:1">●</span>
        Point rouge = re-estimation à la hausse
      </span>
-     <span style="color:#666;font-style:italic">— L'écart entre les deux lignes indique les heures planifiées non consommées.</span>`;
+     <span style="color:#666;font-style:italic">— L'écart entre les deux lignes = heures planifiées non consommées.</span>`;
+}
+
+// ═══════════════════════════════════════════════════
+//  DEV STATS — Planifié vs Consommé par réalisateur
+// ═══════════════════════════════════════════════════
+function computeDevStats() {
+  const n = SPRINT_LABELS.length - 1; // number of historical sprints (exclude 'Actuel')
+  const devMap = new Map();
+
+  EPICS.forEach(e => {
+    // Assigned field may be comma, slash, or semicolon separated
+    const raw = (e.assigned || '').trim();
+    const assignees = raw ? raw.split(/[,\/;]+/).map(s => s.trim()).filter(s => s) : [];
+    if (assignees.length === 0) return;
+    const share = 1 / assignees.length;
+
+    assignees.forEach(dev => {
+      if (!devMap.has(dev)) {
+        devMap.set(dev, {
+          name:     dev,
+          planned:  new Array(n).fill(0),
+          consumed: new Array(n).fill(null)
+        });
+      }
+      const st = devMap.get(dev);
+      for (let i = 0; i < n; i++) {
+        const alloc = (e.allocation && e.allocation[i] != null) ? e.allocation[i] : 0;
+        st.planned[i] = Math.round((st.planned[i] + alloc * share) * 10) / 10;
+      }
+      for (let i = 0; i < n; i++) {
+        const cons = (e.consumed && e.consumed[i] != null) ? e.consumed[i] : null;
+        if (cons !== null) {
+          st.consumed[i] = Math.round(((st.consumed[i] ?? 0) + cons * share) * 10) / 10;
+        }
+      }
+    });
+  });
+
+  return Array.from(devMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+let DEV_STATS = null;
+
+function renderDevTable() {
+  DEV_STATS = computeDevStats();
+  const header = `<thead><tr>
+    <th style="min-width:170px">R&eacute;alisateur</th>
+    <th>Total planifi&eacute; (h)</th>
+    <th>Total consomm&eacute; (h)</th>
+    <th>Taux de consommation</th>
+    <th>Sprints actifs</th>
+    <th>Graphique</th>
+  </tr></thead>`;
+
+  const rows = DEV_STATS.map(d => {
+    const totalPlan = Math.round(d.planned.reduce((s, v) => s + (v || 0), 0) * 10) / 10;
+    const totalCons = Math.round(d.consumed.reduce((s, v) => s + (v ?? 0), 0) * 10) / 10;
+    const rate = totalPlan > 0.01 ? Math.round(totalCons / totalPlan * 100) : (totalCons > 0 ? 999 : 0);
+    const activeCount = d.planned.filter(v => v > 0).length;
+    const rateColor = rate < 70 ? '#dc3545' : rate > 130 ? '#fd7e14' : '#28a745';
+    const bar = totalPlan > 0
+      ? `<div class="prog-wrap">
+           <div class="prog-bar"><div class="prog-fill ${rate<70?'red':rate>130?'orange':'green'}" style="width:${Math.min(rate,100)}%"></div></div>
+           <span class="prog-pct" style="color:${rateColor}">${rate}%</span>
+         </div>`
+      : '<span style="color:#aaa;font-size:11px">—</span>';
+    return `<tr class="clickable" onclick="openDevModal('${d.name.replace(/'/g,"\\'")}')">
+      <td><strong>${d.name}</strong></td>
+      <td style="font-size:12px">${totalPlan > 0 ? totalPlan+'h' : '—'}</td>
+      <td style="font-size:12px;font-weight:700">${totalCons > 0 ? totalCons+'h' : '—'}</td>
+      <td>${bar}</td>
+      <td style="font-size:12px;color:#666">${activeCount} sprint${activeCount!==1?'s':''}</td>
+      <td><button class="chart-btn" onclick="event.stopPropagation();openDevModal('${d.name.replace(/'/g,"\\'")}')">📊 Voir</button></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('tbl-devstats').innerHTML = header + '<tbody>' + rows + '</tbody>';
+}
+
+let devChartInstance = null;
+
+function openDevModal(devName) {
+  const d = DEV_STATS && DEV_STATS.find(x => x.name === devName);
+  if (!d) return;
+
+  document.getElementById('dev-modal-title').textContent = '👤 ' + d.name + ' — Planifié vs Consommé';
+
+  const n = SPRINT_LABELS.length - 1;
+  const totalPlan = Math.round(d.planned.reduce((s, v) => s + (v || 0), 0) * 10) / 10;
+  const totalCons = Math.round(d.consumed.reduce((s, v) => s + (v ?? 0), 0) * 10) / 10;
+  const activeSprints = d.planned.filter(v => v > 0).length;
+  const rate = totalPlan > 0.01 ? Math.round(totalCons / totalPlan * 100) : (totalCons > 0 ? 999 : 0);
+  document.getElementById('dev-modal-meta').innerHTML =
+    `<span>📅 ${activeSprints} sprints actifs</span>
+     <span>📋 Sprints : ${SPRINT_LABELS[0] ?? '?'} → ${SPRINT_LABELS[n-1] ?? '?'}</span>`;
+
+  document.getElementById('dev-modal-stats').innerHTML = `
+    <div class="modal-stat"><div class="sv" style="color:#283593">${totalPlan}h</div><div class="sl">Total planifié</div></div>
+    <div class="modal-stat"><div class="sv" style="color:#28a745">${totalCons}h</div><div class="sl">Total consommé</div></div>
+    <div class="modal-stat"><div class="sv" style="color:${rate<70?'#dc3545':rate>130?'#fd7e14':'#28a745'}">${rate}%</div><div class="sl">Taux consommation</div></div>`;
+
+  document.getElementById('dev-modal').classList.add('open');
+  renderDevChart(d);
+}
+
+function closeDevModal(evt) {
+  if (evt && evt.target !== document.getElementById('dev-modal')) return;
+  document.getElementById('dev-modal').classList.remove('open');
+  if (devChartInstance) { devChartInstance.destroy(); devChartInstance = null; }
+}
+
+function renderDevChart(d) {
+  if (devChartInstance) { devChartInstance.destroy(); devChartInstance = null; }
+  const ctx = document.getElementById('dev-modal-chart').getContext('2d');
+  const n = SPRINT_LABELS.length - 1;
+  const labels = SPRINT_LABELS.slice(0, n);
+
+  const allVals = [...d.planned, ...d.consumed.map(v => v ?? 0)].filter(v => v > 0);
+  const yMax = allVals.length ? Math.ceil(Math.max(...allVals) * 1.15 / 10) * 10 : 100;
+
+  devChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Planifié (h)',
+          data: d.planned,
+          backgroundColor: d.planned.map(h => h > 0 ? 'rgba(66,133,244,0.45)' : 'rgba(200,200,200,0.15)'),
+          borderColor:     d.planned.map(h => h > 0 ? 'rgba(66,133,244,0.80)' : 'rgba(180,180,180,0.30)'),
+          borderWidth: 1.5,
+          order: 2,
+        },
+        {
+          label: 'Consommé réel (h)',
+          data: d.consumed,
+          backgroundColor: 'rgba(192,132,252,0.55)',
+          borderColor:     'rgba(147,51,234,0.85)',
+          borderWidth: 1.5,
+          order: 1,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 12 }, boxWidth: 14 } },
+        tooltip: {
+          callbacks: {
+            afterBody(items) {
+              const si = items[0]?.dataIndex ?? -1;
+              if (si < 0) return [];
+              const plan = d.planned[si] ?? 0;
+              const cons = d.consumed[si];
+              if (cons === null || cons === undefined) return ['Consommé : données non disponibles'];
+              if (plan > 0.01) {
+                const r = Math.round(cons / plan * 100);
+                if (r < 70)       return [`⚠️ Sous-consommation : ${r}% du planifié`];
+                if (r > 130)      return [`⚠️ Dépassement : ${r}% du planifié`];
+                return [`✓ ${r}% du planifié consommé`];
+              }
+              if (cons > 0) return ['Heures saisies sans planification'];
+              return [];
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          type: 'linear',
+          min: 0,
+          max: yMax,
+          title: { display: true, text: 'Heures', font: { size: 11 }, color: '#444' },
+          ticks: { font: { size: 11 } },
+          grid: { color: 'rgba(0,0,0,0.06)' }
+        },
+        x: { ticks: { font: { size: 11 } } }
+      }
+    }
+  });
+
+  document.getElementById('dev-chart-legend').innerHTML =
+    `<strong>Lecture :</strong>
+     <span style="display:inline-flex;align-items:center;gap:5px">
+       <span style="display:inline-block;width:14px;height:14px;background:rgba(66,133,244,0.45);border:1px solid rgba(66,133,244,0.8);border-radius:2px"></span>
+       Planifié
+     </span>
+     <span style="display:inline-flex;align-items:center;gap:5px">
+       <span style="display:inline-block;width:14px;height:14px;background:rgba(192,132,252,0.55);border:1px solid rgba(147,51,234,0.85);border-radius:2px"></span>
+       Consommé réel
+     </span>
+     <span style="color:#666;font-style:italic">— Les heures sont proratisées en cas d'affectation multiple sur un epic.</span>`;
 }
 
 // ═══════════════════════════════════════════════════
@@ -587,11 +909,29 @@ function toggleSection(id) {
   }
 }
 
+function expandAll() {
+  document.querySelectorAll('.collapsible').forEach(el => {
+    el.classList.remove('collapsed');
+    el.style.maxHeight = el.scrollHeight + 9999 + 'px';
+    const title = el.previousElementSibling;
+    if (title) title.classList.remove('collapsed');
+  });
+}
+
+function collapseAll() {
+  document.querySelectorAll('.collapsible').forEach(el => {
+    el.classList.add('collapsed');
+    el.style.maxHeight = '0px';
+    const title = el.previousElementSibling;
+    if (title) title.classList.add('collapsed');
+  });
+}
+
 document.querySelectorAll('.collapsible').forEach(el => {
   el.style.maxHeight = el.scrollHeight + 9999 + 'px';
 });
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeDevModal(); } });
 
 // ═══════════════════════════════════════════════════
 //  INIT
@@ -599,6 +939,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 renderCards();
 renderTables();
 renderPipeline();
+renderConsumptions();
+renderDevTable();
 renderHeatmap();
 
 setTimeout(() => {
@@ -617,6 +959,21 @@ setTimeout(() => {
     // ─────────────────────────────────────────────────────────────────────────
     // JS data builders
     // ─────────────────────────────────────────────────────────────────────────
+
+    private static string BuildConsumptionJs(EpicAnalysisReportModel m)
+    {
+        var sb = new StringBuilder();
+        sb.Append("const EPIC_CONSUMPTIONS = [\n");
+        foreach (EpicConsumptionEntry e in m.EpicConsumptions)
+        {
+            sb.AppendLine(
+                $"  {{epicId:'{JsStr(e.EpicId)}', epicName:'{JsStr(e.EpicName)}'," +
+                $" planned:{Fmt(e.Planned)}, consumed:{Fmt(e.Consumed)}, remaining:{Fmt(e.Remaining)}," +
+                $" overhead:{Fmt(e.Overhead)}, usageRatePct:{Fmt(e.UsageRatePct)}}},");
+        }
+        sb.Append("];\n\n");
+        return sb.ToString();
+    }
 
     private static string BuildSprintLabelsJs(EpicAnalysisReportModel m)
     {
@@ -642,6 +999,9 @@ setTimeout(() => {
                 ? e.OriginalEstimate.Value.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)
                 : "null";
 
+            string cons = "[" + string.Join(", ", e.Consumed.Select(c =>
+                c.HasValue ? c.Value.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) : "null")) + "]";
+
             sb.AppendLine(
                 $"{{id:'{JsStr(e.Id)}', name:'{JsStr(e.Name)}', manager:'{JsStr(e.Manager)}'," +
                 $" assigned:'{JsStr(e.Assigned)}', state:'{JsStr(e.State)}', risk:'{JsStr(e.Risk)}'," +
@@ -649,7 +1009,8 @@ setTimeout(() => {
                 $" riskSince:'{JsStr(e.RiskSince)}', stateLabel:'{JsStr(e.StateLabel)}'," +
                 $" riskDesc:'{JsStr(e.RiskDesc)}'," +
                 $" allocation:{alloc}," +
-                $" remaining:{rem}}},");
+                $" remaining:{rem}," +
+                $" consumed:{cons}}},");
         }
         sb.Append("];\n\n");
         return sb.ToString();
@@ -683,4 +1044,7 @@ setTimeout(() => {
            .Replace("'", "\\'")
            .Replace("\r", "")
            .Replace("\n", " ");
+
+    private static string Fmt(double v) =>
+        v.ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
 }

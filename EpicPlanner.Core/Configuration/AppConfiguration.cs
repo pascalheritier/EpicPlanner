@@ -6,7 +6,6 @@ public class AppConfiguration
     public RedmineConfiguration RedmineConfiguration { get; set; } = new();
     public PlannerConfiguration PlannerConfiguration { get; set; } = new();
     public StrategicPlanningConfiguration StrategicPlanningConfiguration { get; set; } = new();
-    public EpicAnalysisReportConfiguration EpicAnalysisReportConfiguration { get; set; } = new();
 }
 
 public class FileConfiguration
@@ -20,6 +19,9 @@ public class FileConfiguration
     public string OutputFilePath { get; set; } = string.Empty;
     public string OutputPngFilePath { get; set; } = string.Empty;
     public string? DevSprintSummaryOutputPngFilePath { get; set; }
+
+    /// <summary>Root folder containing the Sprint XX subdirectories (e.g. the "Sprint planning" folder).</summary>
+    public string SprintPlanningFolderPath { get; set; } = string.Empty;
 }
 
 public class PlannerConfiguration

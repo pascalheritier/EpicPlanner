@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using EpicPlanner.Core.Checker;
+using EpicPlanner.Core.Checker.Reports;
 using EpicPlanner.Core.Shared.Models;
 using EpicPlanner.Core.Shared.Simulation;
 using OfficeOpenXml;
@@ -46,23 +47,30 @@ public class CheckerSimulator : SimulatorBase
     private IReadOnlyList<SprintEpicSummary> EpicSummaries => m_EpicSummaries;
     private IReadOnlyDictionary<string, double> PlannedCapacityByEpic => m_PlannedCapacityByEpic;
 
-    public void ExportCheckerReport(string _strOutputExcelPath, EnumCheckerMode _enumMode)
+    public void ExportCheckerReport(
+        string _strOutputPath,
+        EnumCheckerMode _enumMode,
+        EpicAnalysisReportModel? _AnalysisModel = null,
+        EpicAnalysisHtmlGenerator? _HtmlGenerator = null)
     {
-        using ExcelPackage package = new();
-
         switch (_enumMode)
         {
             case EnumCheckerMode.Comparison:
-                WriteComparisonWorksheet(package);
+                using (ExcelPackage package = new())
+                {
+                    WriteComparisonWorksheet(package);
+                    package.SaveAs(new FileInfo(_strOutputPath));
+                }
                 break;
+
             case EnumCheckerMode.EpicStates:
-                WriteEpicWorksheet(package);
+                if (_AnalysisModel is not null && _HtmlGenerator is not null)
+                    _HtmlGenerator.Generate(_AnalysisModel, _strOutputPath);
                 break;
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(_enumMode), _enumMode, "Unsupported checker mode.");
         }
-
-        package.SaveAs(new FileInfo(_strOutputExcelPath));
     }
 
     private void WriteComparisonWorksheet(ExcelPackage _Package)

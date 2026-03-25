@@ -39,9 +39,9 @@ public class EpicAnalysisDataLoader
     private readonly AppConfiguration m_Config;
     private static readonly StringComparer s_IdComparer = StringComparer.OrdinalIgnoreCase;
 
-    // Matches directory names like "Sprint 76", "Sprint 83"
+    // Matches directory names like "Sprint 76", "Sprint 83", "Sprint83"
     private static readonly Regex s_SprintDirRegex =
-        new(@"^Sprint\s+(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        new(@"^Sprint\s*(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Matches sprint planning xlsx (not Planification, not retrospective, not comparison/Comparison)
     private static readonly Regex s_SprintPlanFileRegex =
@@ -62,11 +62,11 @@ public class EpicAnalysisDataLoader
 
     public Task<EpicAnalysisReportModel> LoadAsync()
     {
-        EpicAnalysisReportConfiguration reportConfig = m_Config.EpicAnalysisReportConfiguration;
+        string sprintFolder = m_Config.FileConfiguration.SprintPlanningFolderPath;
 
-        List<SprintFileData> history = DiscoverSprintFiles(reportConfig.InputFolderPath);
+        List<SprintFileData> history = DiscoverSprintFiles(sprintFolder);
 
-        string epicFilePath = ResolveCurrentEpicFile(reportConfig.InputFolderPath, m_Config.FileConfiguration.InputFilePath);
+        string epicFilePath = ResolveCurrentEpicFile(sprintFolder);
         List<CurrentEpicRow> currentEpics = ReadCurrentEpics(epicFilePath);
 
         int n = history.Count;
@@ -103,10 +103,34 @@ public class EpicAnalysisDataLoader
 
         string lastSprint = sprintLabels.LastOrDefault() ?? string.Empty;
 
+        // Build per-epic consumption for the latest sprint from already-loaded data.
+        List<EpicConsumptionEntry> consumptions = new();
+        if (n > 0)
+        {
+            foreach (EpicAnalysisEntry e in mainEntries)
+            {
+                double planned   = n - 1 < e.Allocation.Length ? e.Allocation[n - 1] : 0.0;
+                double consumed  = n - 1 < e.Consumed.Length && e.Consumed[n - 1].HasValue
+                                   ? e.Consumed[n - 1]!.Value : 0.0;
+                double remaining = e.CurrentRemaining;
+                if (planned > 0 || consumed > 0)
+                    consumptions.Add(new EpicConsumptionEntry
+                    {
+                        EpicId    = e.Id,
+                        EpicName  = e.Name,
+                        Planned   = Math.Round(planned,   1),
+                        Consumed  = Math.Round(consumed,  1),
+                        Remaining = Math.Round(remaining, 1),
+                    });
+            }
+            consumptions.Sort((a, b) => s_IdComparer.Compare(a.EpicId, b.EpicId));
+        }
+
         return Task.FromResult(new EpicAnalysisReportModel
         {
             Epics = mainEntries,
             Pipeline = pipelineEntries,
+            EpicConsumptions = consumptions,
             SprintLabels = sprintLabels,
             SprintDates = sprintDates,
             GeneratedAt = DateTime.Now,
@@ -336,28 +360,30 @@ public class EpicAnalysisDataLoader
     /// Resolves the path to the current Planification_des_Epics.xlsx.
     /// Prefers the most recent one found in the sprint folder, falls back to FileConfiguration.InputFilePath.
     /// </summary>
-    private static string ResolveCurrentEpicFile(string inputFolder, string fallbackPath)
+    private static string ResolveCurrentEpicFile(string inputFolder)
     {
-        if (!string.IsNullOrWhiteSpace(inputFolder) && Directory.Exists(inputFolder))
-        {
-            // Find the latest "Planification_des_Epics.xlsx" in any Sprint XX / vN subdirectory
-            var candidates = Directory
-                .GetFiles(inputFolder, "Planification_des_Epics.xlsx", SearchOption.AllDirectories)
-                .Select(f => (File: f, SprintNum: ExtractSprintNumFromPath(f)))
-                .Where(c => c.SprintNum > 0)
-                .OrderByDescending(c => c.SprintNum)
-                .ThenByDescending(c => ExtractVersionFromPath(c.File))
-                .ToList();
+        if (string.IsNullOrWhiteSpace(inputFolder) || !Directory.Exists(inputFolder))
+            throw new DirectoryNotFoundException(
+                $"Sprint planning folder not found: '{inputFolder}'. Set FileConfiguration.SprintPlanningFolderPath.");
 
-            if (candidates.Count > 0) return candidates[0].File;
-        }
+        var candidates = Directory
+            .GetFiles(inputFolder, "*Planification_des_Epics.xlsx", SearchOption.AllDirectories)
+            .Select(f => (File: f, SprintNum: ExtractSprintNumFromPath(f)))
+            .Where(c => c.SprintNum > 0)
+            .OrderByDescending(c => c.SprintNum)
+            .ThenByDescending(c => ExtractVersionFromPath(c.File))
+            .ToList();
 
-        return fallbackPath;
+        if (candidates.Count == 0)
+            throw new FileNotFoundException(
+                $"No 'Planification_des_Epics.xlsx' found under a Sprint XX subdirectory in '{inputFolder}'.");
+
+        return candidates[0].File;
     }
 
     private static int ExtractSprintNumFromPath(string path)
     {
-        Match m = Regex.Match(path, @"[/\\]Sprint\s+(\d+)[/\\]", RegexOptions.IgnoreCase);
+        Match m = Regex.Match(path, @"[/\\]Sprint\s*(\d+)[/\\]", RegexOptions.IgnoreCase);
         return m.Success ? int.Parse(m.Groups[1].Value) : 0;
     }
 
@@ -448,6 +474,16 @@ public class EpicAnalysisDataLoader
             ? ("done", "—", string.Empty)
             : EpicRiskAssessor.Assess(epic.Id, DetermineStateJs(epic.State), orig, cur, allocation, remaining, sprintLabels);
 
+        // Compute consumed per sprint from the decrease in remaining hours.
+        // consumed[i] = remaining[i] − remaining[i+1], clamped ≥ 0 (re-estimations make
+        // remaining rise, which should not produce a negative consumption).
+        double?[] consumed = new double?[n];
+        for (int i = 0; i < n; i++)
+        {
+            if (remaining[i].HasValue && remaining[i + 1].HasValue)
+                consumed[i] = Math.Max(0, Math.Round(remaining[i]!.Value - remaining[i + 1]!.Value, 1));
+        }
+
         return new EpicAnalysisEntry
         {
             Id               = epic.Id,
@@ -462,7 +498,8 @@ public class EpicAnalysisDataLoader
             StateLabel       = epic.State,
             RiskDesc         = riskDesc,
             Allocation       = allocation,
-            Remaining        = remaining
+            Remaining        = remaining,
+            Consumed         = consumed
         };
     }
 

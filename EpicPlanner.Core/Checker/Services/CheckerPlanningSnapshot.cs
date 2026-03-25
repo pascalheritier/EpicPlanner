@@ -53,6 +53,10 @@ public class CheckerPlanningSnapshot : PlanningSnapshotBase
 
     public IReadOnlyDictionary<string, double> PlannedCapacityByEpic => m_PlannedCapacityByEpic;
 
+    /// <summary>Resource capacities for the current sprint (sprint offset 0).</summary>
+    public IReadOnlyDictionary<string, ResourceCapacity>? CurrentSprintCapacities =>
+        SprintCapacities.TryGetValue(0, out Dictionary<string, ResourceCapacity>? cap) ? cap : null;
+
     #endregion
 
     #region Create Simulator
